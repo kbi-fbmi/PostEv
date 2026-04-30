@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { IconLoader2 } from "@tabler/icons-react";
 
 interface CropRect {
   x: number; // 0–1 relative to image width/height
@@ -12,7 +13,7 @@ interface CropModalProps {
   file: File;
   imageSize: { width: number; height: number };
   fileCount: number;
-  onConfirm: (crop: { x: number; y: number; width: number; height: number }) => void;
+  onConfirm: (crop: { x: number; y: number; width: number; height: number }) => Promise<void>;
   onSkip: () => void;
 }
 
@@ -42,6 +43,7 @@ export function CropModal({
   onSkip,
 }: CropModalProps) {
   const [step, setStep] = useState<"prompt" | "crop">("prompt");
+  const [applying, setApplying] = useState(false);
   const [imageUrl, setImageUrl] = useState("");
   const [crop, setCrop] = useState<CropRect>({ x: 0, y: 0, w: 1, h: 1 });
   const [cursor, setCursor] = useState("crosshair");
@@ -188,13 +190,15 @@ export function CropModal({
     };
   }, [getRelPos]);
 
-  const handleConfirm = () => {
-    onConfirm({
+  const handleConfirm = async () => {
+    setApplying(true);
+    await onConfirm({
       x: Math.round(crop.x * imageSize.width),
       y: Math.round(crop.y * imageSize.height),
       width: Math.round(crop.w * imageSize.width),
       height: Math.round(crop.h * imageSize.height),
     });
+    setApplying(false);
   };
 
   if (step === "prompt") {
@@ -320,14 +324,23 @@ export function CropModal({
         </div>
 
         <div className="flex items-center justify-between border-t px-6 py-4">
-          <Button variant="outline" onClick={() => setStep("prompt")}>
+          <Button variant="outline" onClick={() => setStep("prompt")} disabled={applying}>
             Back
           </Button>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={onSkip}>
+            <Button variant="outline" onClick={onSkip} disabled={applying}>
               Skip crop
             </Button>
-            <Button onClick={handleConfirm}>Apply crop to all</Button>
+            <Button onClick={handleConfirm} disabled={applying}>
+              {applying ? (
+                <span className="flex items-center gap-2">
+                  <IconLoader2 className="h-4 w-4 animate-spin" />
+                  Applying…
+                </span>
+              ) : (
+                "Apply crop to all"
+              )}
+            </Button>
           </div>
         </div>
       </div>

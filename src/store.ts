@@ -15,6 +15,12 @@ import { importPhotosWithJson } from "./helpers/import";
 import JSZip from "jszip";
 import { OnUpdateCallback } from "jszip";
 
+interface PendingImportResult {
+  data: Data[];
+  photoAngleValues: PhotoAngleValues[];
+  zipName: string;
+}
+
 interface AppState {
   tool: string;
   tools: Tool[];
@@ -27,10 +33,12 @@ interface AppState {
   zipProgress: number;
   lineColor: string;
   importedZipName?: string;
+  pendingImportResult: PendingImportResult | null;
   setToolbarHeight: (height: number) => void;
   setTool: (tool: string) => void;
   changeTool: (tool: string) => void;
-  setFiles: (files: File[]) => void;
+  setFiles: (files: File[], cropped?: boolean) => void;
+  commitImportResult: (result: PendingImportResult) => void;
   setPoints: (points: PointWithIndex[]) => void;
   handlePhotoAngleValues: (
     calculateAngle: CalculatedAngle,
@@ -92,6 +100,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   zipProgress: 0,
   lineColor: "#88fa2a",
   importedZipName: undefined,
+  pendingImportResult: null,
 
   setToolbarHeight: (height) => {
     if (get().toolbarHeight !== height) {
@@ -267,7 +276,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ tools: newTools });
   },
 
-  setFiles: (newFiles) => {
+  setFiles: (newFiles, cropped) => {
     const state = get();
     if (state.data !== null) return;
 
@@ -292,6 +301,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         isFlipped: false,
         usedAngle: { totalCC: false, pisa: false, back: false, upperCC: false, apicalVertebra: false, coronalBalance: false, sagittalBalance: false, thoricalSagittalAlignment: false },
         lastSelectedAngleTool: null,
+        cropped,
       });
       newPhotoAngleValues.push({ name: file.name, angles: [] });
     }
@@ -301,6 +311,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       data: newData,
       view: { tool: "drag", index: 0 },
       importedZipName: rootFolder || undefined,
+    });
+    get().handleDisableFilesTools(0);
+  },
+
+  commitImportResult: (result) => {
+    set({
+      data: result.data,
+      view: { tool: "drag", index: 0 },
+      photoAngleValues: result.photoAngleValues,
+      importedZipName: result.zipName,
+      pendingImportResult: null,
     });
     get().handleDisableFilesTools(0);
   },
@@ -408,11 +429,18 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const importedZipName = file.name.replace(/\.zip$/i, "");
 
+      const needsCrop = newData.some((d) => d.cropped === undefined);
+      if (needsCrop) {
+        set({ pendingImportResult: { data: newData, photoAngleValues: importedAngleValues, zipName: importedZipName } });
+        return;
+      }
+
       set({
         data: newData,
         view: { tool: "drag", index: 0 },
         photoAngleValues: importedAngleValues,
         importedZipName,
+        pendingImportResult: null,
       });
       get().handleDisableFilesTools(0);
     } catch (e) {

@@ -92,6 +92,7 @@ export interface Data {
   lastSelectedAngleTool: string | null;
   brightness?: number;
   contrast?: number;
+  cropped?: boolean;
 }
 
 export interface Angles {

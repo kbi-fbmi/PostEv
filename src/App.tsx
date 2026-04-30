@@ -3,7 +3,7 @@ import Toolbar from "./components/toolbar";
 import FileDragNDrop from "./components/file_drag_n_drop";
 import Canvas from "./canvas";
 import NoFiles from "./components/no_files";
-import { Angles, CalculatedAngle, Point } from "./types";
+import { Angles, CalculatedAngle, Data, PhotoAngleValues, Point } from "./types";
 import { useAppStore } from "./store";
 import { Toaster } from "./components/ui/toaster";
 import { useToast } from "./hooks/use-toast";
@@ -81,9 +81,11 @@ function App() {
     download,
     zipDownload,
     zipProgress,
+    pendingImportResult,
     setToolbarHeight,
     changeTool,
     setFiles,
+    commitImportResult,
     setPoints,
     handlePhotoAngleValues,
     handleZipDownload,
@@ -97,6 +99,11 @@ function App() {
   const [pendingImageSize, setPendingImageSize] = useState<{
     width: number;
     height: number;
+  } | null>(null);
+  const [pendingImportData, setPendingImportData] = useState<{
+    data: Data[];
+    photoAngleValues: PhotoAngleValues[];
+    zipName: string;
   } | null>(null);
 
   const handleIncomingFiles = useCallback(
@@ -126,22 +133,85 @@ function App() {
 
   const handleCropConfirm = useCallback(
     async (crop: { x: number; y: number; width: number; height: number }) => {
+      if (pendingImportData) {
+        const files = pendingImportData.data.map((d) => d.file);
+        const croppedFiles = await applyCropToFiles(files, crop);
+        const updatedData = pendingImportData.data.map((d, i) => ({
+          ...d,
+          file: croppedFiles[i],
+          cropped: true as const,
+          angle: d.angle
+            ? {
+                ...d.angle,
+                points: d.angle.points.map((p) =>
+                  p.x != null && p.y != null
+                    ? { ...p, x: p.x - crop.x, y: p.y - crop.y }
+                    : p
+                ),
+              }
+            : d.angle,
+        }));
+        const updatedPhotoAngleValues = pendingImportData.photoAngleValues.map((pav) => ({
+          ...pav,
+          angles: pav.angles.map((a) => ({
+            ...a,
+            value:
+              a.value.x != null && a.value.y != null
+                ? { ...a.value, x: a.value.x - crop.x, y: a.value.y - crop.y }
+                : a.value,
+          })),
+        }));
+        commitImportResult({ ...pendingImportData, data: updatedData, photoAngleValues: updatedPhotoAngleValues });
+        setPendingImportData(null);
+        setPendingImageSize(null);
+        return;
+      }
       if (!pendingFiles) return;
       const croppedFiles = await applyCropToFiles(pendingFiles, crop);
       setPendingFiles(null);
       setPendingImageSize(null);
-      setFiles(croppedFiles);
+      setFiles(croppedFiles, true);
     },
-    [pendingFiles, setFiles]
+    [pendingFiles, pendingImportData, setFiles, commitImportResult]
   );
 
   const handleCropSkip = useCallback(() => {
+    if (pendingImportData) {
+      const updatedData = pendingImportData.data.map((d) => ({ ...d, cropped: false as const }));
+      commitImportResult({ ...pendingImportData, data: updatedData });
+      setPendingImportData(null);
+      setPendingImageSize(null);
+      return;
+    }
     if (!pendingFiles) return;
     const files = pendingFiles;
     setPendingFiles(null);
     setPendingImageSize(null);
-    setFiles(files);
-  }, [pendingFiles, setFiles]);
+    setFiles(files, false);
+  }, [pendingFiles, pendingImportData, setFiles, commitImportResult]);
+
+  useEffect(() => {
+    if (!pendingImportResult) return;
+    const files = pendingImportResult.data.map((d) => d.file);
+    if (files.length < 2) {
+      commitImportResult(pendingImportResult);
+      return;
+    }
+    Promise.all(files.map(getImageSize))
+      .then((sizes) => {
+        const first = sizes[0];
+        const allSame = sizes.every(
+          (s) => s.width === first.width && s.height === first.height
+        );
+        if (!allSame) {
+          commitImportResult(pendingImportResult);
+        } else {
+          setPendingImportData(pendingImportResult);
+          setPendingImageSize(first);
+        }
+      })
+      .catch(() => commitImportResult(pendingImportResult));
+  }, [pendingImportResult, commitImportResult]);
 
   useEffect(() => {
     const newHeight = toolbarRef.current?.clientHeight || 0;
@@ -302,11 +372,11 @@ function App() {
           </div>
         </div>
       )}
-      {pendingFiles && pendingImageSize && (
+      {(pendingFiles || pendingImportData) && pendingImageSize && (
         <CropModal
-          file={pendingFiles[0]}
+          file={(pendingImportData?.data[0].file ?? pendingFiles![0])}
           imageSize={pendingImageSize}
-          fileCount={pendingFiles.length}
+          fileCount={pendingImportData?.data.length ?? pendingFiles!.length}
           onConfirm={handleCropConfirm}
           onSkip={handleCropSkip}
         />

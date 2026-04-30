@@ -131,6 +131,7 @@ export const importPhotosWithJson = async (
         isFlipped: metadata.isFlipped,
         usedAngle: metadata.usedAngle,
         lastSelectedAngleTool: metadata.lastSelectedAngleTool,
+        cropped: metadata.cropped,
       });
 
       newPhotoAngleValues.push({

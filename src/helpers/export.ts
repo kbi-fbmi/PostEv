@@ -81,6 +81,7 @@ export const exportPhotosWithJson = async (
         lastSelectedAngleTool: dataItem.lastSelectedAngleTool,
         originalPath: filePath,
         angleValues: relativeAngleValues,
+        cropped: dataItem.cropped,
       };
 
       zip.file(jsonFilePath, JSON.stringify(jsonData, null, 2));
