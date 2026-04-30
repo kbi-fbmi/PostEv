@@ -1,0 +1,22 @@
+name: Deploy 
+
+on:
+  push:
+    branches:
+      - main-kbidb
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+            git pull origin main-kbidb
+            docker build -t postev:latest .
+            docker compose up -d --force-recreate

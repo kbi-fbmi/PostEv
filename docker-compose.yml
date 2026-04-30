@@ -1,0 +1,21 @@
+services:
+  postev:
+    image: postev:latest
+    container_name: postev
+    restart: unless-stopped
+    networks:
+      - traefik_public_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.postev.rule=Host(`postev.gaxil.eu`)"
+      - "traefik.http.routers.postev.entrypoints=websecure"
+      - "traefik.http.routers.postev.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.postev-http.rule=Host(`postev.gaxil.eu`)"
+      - "traefik.http.routers.postev-http.entrypoints=web"
+      - "traefik.http.routers.postev-http.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.services.postev.loadbalancer.server.port=80"
+
+networks:
+  traefik_public_net:
+    external: true
