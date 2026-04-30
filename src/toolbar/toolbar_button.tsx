@@ -18,7 +18,7 @@ const ToolbarButton = ({
   activeTool
 }: ToolbarButtonProps) => {
   return (
-    <div className={cn("flex items-center justify-center gap-2", activeTool === tool.codeName && "border-b-2")}>
+    <div className={cn("flex items-center justify-center", isOpen && "gap-2", activeTool === tool.codeName && "border-b-2")}>
       {!tool.hideTool && <button
         className="p-1"
         onClick={() => {

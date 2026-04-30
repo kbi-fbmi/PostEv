@@ -1,5 +1,6 @@
 import {
   Icon,
+  IconBodyScan,
   IconBookDownload,
   IconCaretLeft,
   IconCaretRight,
@@ -119,6 +120,50 @@ const tools: Tool[] = [
         image: IconCaretRight,
         codeName: "next",
         tooltip: "Next",
+      },
+    ],
+  },
+  {
+    name: "XRAY",
+    codeName: "xray",
+    image: IconBodyScan,
+    groupToggle: true,
+    children: [
+      {
+        angle: true,
+        name: "ApVrt",
+        codeName: "apicalVertebra",
+        tooltip: "Apical Vertebra (Cobb angle)",
+      },
+      {
+        angle: true,
+        name: "CorBl",
+        codeName: "coronalBalance",
+        tooltip: "Coronal Balance",
+      },
+      {
+        angle: true,
+        name: "SagBl",
+        codeName: "sagittalBalance",
+        tooltip: "Sagittal Balance",
+      },
+      {
+        angle: true,
+        name: "ThSAl",
+        codeName: "thoricalSagittalAlignment",
+        tooltip: "Thorical Sagittal Alignment",
+      },
+      {
+        angle: true,
+        name: "ThLmb",
+        codeName: "thoracolumbar",
+        tooltip: "Thoracolumbar",
+      },
+      {
+        angle: true,
+        name: "Cobb",
+        codeName: "cebb",
+        tooltip: "Cobb",
       },
     ],
   },

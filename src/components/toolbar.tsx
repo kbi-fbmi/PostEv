@@ -4,6 +4,7 @@ import ToolbarButton from "@/toolbar/toolbar_button";
 import { Tool } from "@/data/tools";
 import { useAppStore } from "@/store";
 import { ColorPicker } from "./ui/color_picker";
+import { ImageAdjust } from "./ui/image_adjust";
 
 interface ToolbarProps {
   className?: string;
@@ -15,17 +16,18 @@ interface ToolbarProps {
 const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(
   ({ className, tool, setTool, tools }, ref) => {
     const [isOpen, setIsOpen] = useState<string | null>(null);
-    const { lineColor, setLineColor, data, view } = useAppStore();
+    const { lineColor, setLineColor, data, view, setImageAdjust } = useAppStore();
 
     const photoManipulationTools = tools.find((t) => t.codeName === "photomanipulation")
     const photoSwitch = tools.find((t) => t.codeName === "photoswitch")
     const importExport = tools.find((t) => t.codeName === "importexport")
     const loadedFilemanagment = tools.find((t) => t.codeName === "lfmanagment")
     const removeFiles = tools.find((t) => t.codeName === "removeFiles")
+    const xrayTools = tools.find((t) => t.codeName === "xray")
 
     const measuringTools = tools.filter(
       (t) =>
-        t.codeName !== "photomanipulation" && t.codeName !== "photoswitch" && t.codeName !== "importexport" && t.codeName !== "lfmanagment" && t.codeName !== "removeFiles"
+        t.codeName !== "photomanipulation" && t.codeName !== "photoswitch" && t.codeName !== "importexport" && t.codeName !== "lfmanagment" && t.codeName !== "removeFiles" && t.codeName !== "xray"
     );
 
     return (
@@ -66,6 +68,23 @@ const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(
                 </div>
               );
             })}
+            <div className="mx-4 h-8 w-[1px] bg-border" />
+
+            {xrayTools && (
+              <div className={cn("flex items-center overflow-hidden transition-all duration-300 ease-in-out max-w-[400px] opacity-100", isOpen === xrayTools.codeName && "mr-2")}>
+                <ToolbarButton
+                  key={xrayTools.codeName}
+                  tool={xrayTools}
+                  onClickOpen={(codeName) => {
+                    setIsOpen(isOpen === codeName ? null : codeName);
+                  }}
+                  onClickSet={setTool}
+                  isOpen={isOpen === xrayTools.codeName}
+                  activeTool={tool}
+                />
+              </div>
+            )}
+
             <div className="mx-4 h-8 w-[1px] bg-border" />
 
             {photoSwitch && (
@@ -125,7 +144,13 @@ const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(
               </div>
             )}
             <div className="mx-4 h-8 w-[1px] bg-border/40" />
-            <div className="flex items-center">
+            <div className="flex items-center gap-2">
+              <ImageAdjust
+                brightness={data?.[view.index]?.brightness ?? 100}
+                contrast={data?.[view.index]?.contrast ?? 100}
+                onChange={setImageAdjust}
+                disabled={!data}
+              />
               <ColorPicker
                 value={lineColor}
                 onChange={setLineColor}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Toolbar from "./components/toolbar";
 import FileDragNDrop from "./components/file_drag_n_drop";
 import Canvas from "./canvas";
@@ -7,6 +7,63 @@ import { Angles, CalculatedAngle, Point } from "./types";
 import { useAppStore } from "./store";
 import { Toaster } from "./components/ui/toaster";
 import { useToast } from "./hooks/use-toast";
+import { CropModal } from "./components/crop_modal";
+
+async function getImageSize(
+  file: File
+): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: img.width, height: img.height });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject();
+    };
+    img.src = url;
+  });
+}
+
+async function applyCropToFiles(
+  files: File[],
+  crop: { x: number; y: number; width: number; height: number }
+): Promise<File[]> {
+  return Promise.all(
+    files.map(async (file) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      await new Promise<void>((res, rej) => {
+        img.onload = () => res();
+        img.onerror = rej;
+        img.src = url;
+      });
+      URL.revokeObjectURL(url);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = crop.width;
+      canvas.height = crop.height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, -crop.x, -crop.y);
+
+      const blob = await new Promise<Blob>((res) =>
+        canvas.toBlob((b) => res(b!), file.type || "image/png")
+      );
+      const newFile = new File([blob], file.name, {
+        type: file.type || "image/png",
+      });
+      if (file.webkitRelativePath) {
+        Object.defineProperty(newFile, "webkitRelativePath", {
+          value: file.webkitRelativePath,
+          writable: false,
+        });
+      }
+      return newFile;
+    })
+  );
+}
 
 function App() {
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -35,6 +92,56 @@ function App() {
     setTool,
     handleDisableFilesTools,
   } = useAppStore();
+
+  const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
+  const [pendingImageSize, setPendingImageSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+
+  const handleIncomingFiles = useCallback(
+    async (files: File[]) => {
+      if (files.length < 2) {
+        setFiles(files);
+        return;
+      }
+      try {
+        const sizes = await Promise.all(files.map(getImageSize));
+        const first = sizes[0];
+        const allSame = sizes.every(
+          (s) => s.width === first.width && s.height === first.height
+        );
+        if (!allSame) {
+          setFiles(files);
+          return;
+        }
+        setPendingFiles(files);
+        setPendingImageSize(first);
+      } catch {
+        setFiles(files);
+      }
+    },
+    [setFiles]
+  );
+
+  const handleCropConfirm = useCallback(
+    async (crop: { x: number; y: number; width: number; height: number }) => {
+      if (!pendingFiles) return;
+      const croppedFiles = await applyCropToFiles(pendingFiles, crop);
+      setPendingFiles(null);
+      setPendingImageSize(null);
+      setFiles(croppedFiles);
+    },
+    [pendingFiles, setFiles]
+  );
+
+  const handleCropSkip = useCallback(() => {
+    if (!pendingFiles) return;
+    const files = pendingFiles;
+    setPendingFiles(null);
+    setPendingImageSize(null);
+    setFiles(files);
+  }, [pendingFiles, setFiles]);
 
   useEffect(() => {
     const newHeight = toolbarRef.current?.clientHeight || 0;
@@ -171,11 +278,13 @@ function App() {
               points={getCurrentAnglePoints() || []}
               stageRef={stageRef}
               handlePhotoAngleValues={handleCanvasPhotoAngleValues}
+              brightness={data[view.index].brightness ?? 100}
+              contrast={data[view.index].contrast ?? 100}
             />
           </>
         )}
         <FileDragNDrop
-          setFiles={setFiles}
+          setFiles={handleIncomingFiles}
           disabled={data !== null}
           open={tool === "file"}
         />
@@ -192,6 +301,15 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+      {pendingFiles && pendingImageSize && (
+        <CropModal
+          file={pendingFiles[0]}
+          imageSize={pendingImageSize}
+          fileCount={pendingFiles.length}
+          onConfirm={handleCropConfirm}
+          onSkip={handleCropSkip}
+        />
       )}
       <Toaster />
     </div>

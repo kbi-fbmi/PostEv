@@ -43,6 +43,7 @@ interface AppState {
   setDownload: (value: boolean) => void;
   handleDisableFilesTools: (index: number) => void;
   setLineColor: (color: string) => void;
+  setImageAdjust: (brightness: number, contrast: number) => void;
 }
 
 const initialTools = toolsData.map((tool) => {
@@ -101,6 +102,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   setView: (view) => set({ view }),
   setDownload: (value) => set({ download: value }),
   setLineColor: (color) => set({ lineColor: color }),
+
+  setImageAdjust: (brightness, contrast) => {
+    const { data, view } = get();
+    if (!data) return;
+    const newData = [...data];
+    newData[view.index] = { ...newData[view.index], brightness, contrast };
+    set({ data: newData });
+  },
 
   changeTool: async (tool) => {
     const { data, view } = get();
@@ -281,7 +290,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           filename: file.name,
         },
         isFlipped: false,
-        usedAngle: { totalCC: false, pisa: false, back: false, upperCC: false },
+        usedAngle: { totalCC: false, pisa: false, back: false, upperCC: false, apicalVertebra: false, coronalBalance: false, sagittalBalance: false, thoricalSagittalAlignment: false },
         lastSelectedAngleTool: null,
       });
       newPhotoAngleValues.push({ name: file.name, angles: [] });
@@ -337,9 +346,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       (angle) => angle.type !== angleTool
     );
 
-    if (["totalCC", "pisa", "back", "upperCC"].includes(angleTool)) {
+    if (["totalCC", "pisa", "back", "upperCC", "apicalVertebra", "coronalBalance", "sagittalBalance", "thoricalSagittalAlignment"].includes(angleTool)) {
       updatedAngles.push({
-        type: angleTool as "totalCC" | "pisa" | "back" | "upperCC",
+        type: angleTool as "totalCC" | "pisa" | "back" | "upperCC" | "apicalVertebra" | "coronalBalance" | "sagittalBalance" | "thoricalSagittalAlignment",
         value: calculateAngle,
       });
     }

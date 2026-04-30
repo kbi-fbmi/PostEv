@@ -24,6 +24,8 @@ interface CanvasProps {
   curIndex: number;
   stageRef: React.RefObject<any>;
   handlePhotoAngleValues: (calculateAngle: CalculatedAngle) => void;
+  brightness?: number;
+  contrast?: number;
 }
 
 const Canvas: React.FC<CanvasProps> = ({
@@ -40,6 +42,8 @@ const Canvas: React.FC<CanvasProps> = ({
   curIndex,
   handlePhotoAngleValues,
   stageRef,
+  brightness = 100,
+  contrast = 100,
 }) => {
   const [image, setImage] = useState<HTMLImageElement | undefined>();
   const [scale, setScale] = useState<number>(1);
@@ -47,6 +51,19 @@ const Canvas: React.FC<CanvasProps> = ({
   const [photoSize, setPhotoSize] = useState<{ width: number; height: number }>(
     { width: 0, height: 0 }
   );
+
+  const filteredImage = useMemo(() => {
+    if (!image) return undefined;
+    if (brightness === 100 && contrast === 100) return image;
+    const offscreen = document.createElement("canvas");
+    offscreen.width = image.width;
+    offscreen.height = image.height;
+    const ctx = offscreen.getContext("2d");
+    if (!ctx) return image;
+    ctx.filter = `brightness(${brightness}%) contrast(${contrast}%)`;
+    ctx.drawImage(image, 0, 0);
+    return offscreen;
+  }, [image, brightness, contrast]);
 
   const throttledSetPoints = useMemo(
     () => throttle((points: PointWithIndex[]) => setPoints(points), 50),
@@ -238,7 +255,7 @@ const Canvas: React.FC<CanvasProps> = ({
       perfectDrawEnabled={false}>
       <Layer>
         <KonvaImage
-          image={image}
+          image={filteredImage}
           scaleX={isFlipped ? -1 : 1}
           x={isFlipped ? image?.width || 0 : 0}
           onMouseEnter={handleMouseEnter}

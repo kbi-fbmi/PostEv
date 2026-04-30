@@ -15,7 +15,7 @@ import {
 } from "@/types";
 import Point from "./point";
 import Connection from "./connection";
-import { Text } from "react-konva";
+import { Line as KonvaLine, Text } from "react-konva";
 import { throttle } from "lodash";
 import { useAppStore } from "@/store";
 
@@ -171,61 +171,96 @@ const Angle = ({
     return { x: intersectX, y: intersectY };
   }, []);
 
+  const getVerticalLine = useCallback((): Line | null => {
+    const extraLine = angle.VerticalLines?.[0];
+    if (!extraLine) return null;
+    const pt = localPoints.find((p) => p.index === extraLine.pointIndex);
+    if (
+      !pt ||
+      typeof pt.point.x !== "number" ||
+      typeof pt.point.y !== "number"
+    )
+      return null;
+    return {
+      start: { x: pt.point.x, y: 0 },
+      end: { x: pt.point.x, y: photoSize.height },
+    };
+  }, [angle, localPoints, photoSize.height]);
+
+  const resolveHorizontalLimit = useCallback(
+    (limit: { type: string; index: number } | null | undefined, fallback: number): number => {
+      if (!limit) return fallback;
+      if (limit.type === "point") {
+        const pt = localPoints.find((p) => p.index === limit.index);
+        if (pt && typeof pt.point.x === "number") return pt.point.x;
+      }
+      if (limit.type === "verticalLine") {
+        const vEntry = angle.VerticalLines?.[limit.index];
+        if (vEntry) {
+          const vPt = localPoints.find((p) => p.index === vEntry.pointIndex);
+          if (vPt && typeof vPt.point.x === "number") return vPt.point.x;
+        }
+      }
+      return fallback;
+    },
+    [angle, localPoints]
+  );
+
+  const getHorizontalLine = useCallback((): Line | null => {
+    const extraLine = angle.HorizontalLines?.[0];
+    if (!extraLine) return null;
+    const pt = localPoints.find((p) => p.index === extraLine.pointIndex);
+    if (
+      !pt ||
+      typeof pt.point.x !== "number" ||
+      typeof pt.point.y !== "number"
+    )
+      return null;
+    const y = pt.point.y;
+    const startX = resolveHorizontalLimit(extraLine.startAt, 0);
+    const endX   = resolveHorizontalLimit(extraLine.endAt,   photoSize.width);
+    return {
+      start: { x: startX, y },
+      end:   { x: endX,   y },
+    };
+  }, [angle, localPoints, photoSize.width, resolveHorizontalLimit]);
+
+
   const calculateAngles = useCallback(() => {
     if (!angle || !angle.ShownedAngles || !linePoints.length) return;
 
     const newCalculatedAngles: CalculatedAngle[] = [];
 
-    angle.ShownedAngles.forEach((showedAngle) => {
-      if (
-        showedAngle.connectionA.index < 0 ||
-        showedAngle.connectionA.index >= linePoints.length ||
-        showedAngle.connectionB.index < 0 ||
-        showedAngle.connectionB.index >= linePoints.length
-      ) {
-        return;
-      }
+    if (angle.HorizontalLines?.length) {
+      const horizontalLine = getHorizontalLine();
+      if (!horizontalLine) return;
+      const connLine = linePoints[0]; 
+      if (!connLine) return;
 
-      const lineA = linePoints[showedAngle.connectionA.index];
-      const lineB = linePoints[showedAngle.connectionB.index];
-
-      if (!lineA || !lineB) return;
-
-      const intersectionPoint = findIntersection(lineA, lineB);
+      const intersectionPoint = findIntersection(connLine, horizontalLine);
       if (!intersectionPoint) return;
 
       if (
-        typeof lineA.start.x === "number" &&
-        typeof lineA.start.y === "number" &&
-        typeof lineA.end.x === "number" &&
-        typeof lineA.end.y === "number" &&
-        typeof lineB.start.x === "number" &&
-        typeof lineB.start.y === "number" &&
-        typeof lineB.end.x === "number" &&
-        typeof lineB.end.y === "number"
+        typeof connLine.start.x === "number" &&
+        typeof connLine.start.y === "number" &&
+        typeof connLine.end.x === "number" &&
+        typeof connLine.end.y === "number"
       ) {
         const vectorA = {
-          x: lineA.end.x - lineA.start.x,
-          y: lineA.end.y - lineA.start.y,
+          x: connLine.end.x - connLine.start.x,
+          y: connLine.end.y - connLine.start.y,
         };
-
-        const vectorB = {
-          x: lineB.end.x - lineB.start.x,
-          y: lineB.end.y - lineB.start.y,
-        };
+        const vectorB = { x: 1, y: 0 };
 
         const dotProduct = vectorA.x * vectorB.x + vectorA.y * vectorB.y;
         const magnitudeA = Math.sqrt(vectorA.x ** 2 + vectorA.y ** 2);
-        const magnitudeB = Math.sqrt(vectorB.x ** 2 + vectorB.y ** 2);
 
-        if (magnitudeA === 0 || magnitudeB === 0) return;
+        if (magnitudeA === 0) return;
 
-        const cosValue = Math.max(
-          -1,
-          Math.min(1, dotProduct / (magnitudeA * magnitudeB))
-        );
+        const cosValue = Math.max(-1, Math.min(1, dotProduct / magnitudeA));
         const angleRadians = Math.acos(cosValue);
-        const angleDegrees = (angleRadians * 180) / Math.PI;
+        let angleDegrees = (angleRadians * 180) / Math.PI;
+        if (angleDegrees > 90) angleDegrees = 180 - angleDegrees;
 
         newCalculatedAngles.push({
           x: intersectionPoint.x,
@@ -233,7 +268,106 @@ const Angle = ({
           angle: angleDegrees,
         });
       }
-    });
+    } else if (angle.VerticalLines?.length) {
+      const verticalLine = getVerticalLine();
+      if (!verticalLine) return;
+      const csvlLine = linePoints[0]; 
+      if (!csvlLine) return;
+
+      const intersectionPoint = findIntersection(csvlLine, verticalLine);
+      if (!intersectionPoint) return;
+
+      if (
+        typeof csvlLine.start.x === "number" &&
+        typeof csvlLine.start.y === "number" &&
+        typeof csvlLine.end.x === "number" &&
+        typeof csvlLine.end.y === "number"
+      ) {
+        const vectorA = {
+          x: csvlLine.end.x - csvlLine.start.x,
+          y: csvlLine.end.y - csvlLine.start.y,
+        };
+        const vectorB = { x: 0, y: 1 };
+
+        const dotProduct = vectorA.x * vectorB.x + vectorA.y * vectorB.y;
+        const magnitudeA = Math.sqrt(vectorA.x ** 2 + vectorA.y ** 2);
+
+        if (magnitudeA === 0) return;
+
+        const cosValue = Math.max(
+          -1,
+          Math.min(1, dotProduct / magnitudeA)
+        );
+        const angleRadians = Math.acos(cosValue);
+        let angleDegrees = (angleRadians * 180) / Math.PI;
+        if (angleDegrees > 90) angleDegrees = 180 - angleDegrees;
+
+        newCalculatedAngles.push({
+          x: intersectionPoint.x,
+          y: intersectionPoint.y,
+          angle: angleDegrees,
+        });
+      }
+    } else {
+      angle.ShownedAngles.forEach((showedAngle) => {
+        if (
+          showedAngle.connectionA.index < 0 ||
+          showedAngle.connectionA.index >= linePoints.length ||
+          showedAngle.connectionB.index < 0 ||
+          showedAngle.connectionB.index >= linePoints.length
+        ) {
+          return;
+        }
+
+        const lineA = linePoints[showedAngle.connectionA.index];
+        const lineB = linePoints[showedAngle.connectionB.index];
+
+        if (!lineA || !lineB) return;
+
+        const intersectionPoint = findIntersection(lineA, lineB);
+        if (!intersectionPoint) return;
+
+        if (
+          typeof lineA.start.x === "number" &&
+          typeof lineA.start.y === "number" &&
+          typeof lineA.end.x === "number" &&
+          typeof lineA.end.y === "number" &&
+          typeof lineB.start.x === "number" &&
+          typeof lineB.start.y === "number" &&
+          typeof lineB.end.x === "number" &&
+          typeof lineB.end.y === "number"
+        ) {
+          const vectorA = {
+            x: lineA.end.x - lineA.start.x,
+            y: lineA.end.y - lineA.start.y,
+          };
+
+          const vectorB = {
+            x: lineB.end.x - lineB.start.x,
+            y: lineB.end.y - lineB.start.y,
+          };
+
+          const dotProduct = vectorA.x * vectorB.x + vectorA.y * vectorB.y;
+          const magnitudeA = Math.sqrt(vectorA.x ** 2 + vectorA.y ** 2);
+          const magnitudeB = Math.sqrt(vectorB.x ** 2 + vectorB.y ** 2);
+
+          if (magnitudeA === 0 || magnitudeB === 0) return;
+
+          const cosValue = Math.max(
+            -1,
+            Math.min(1, dotProduct / (magnitudeA * magnitudeB))
+          );
+          const angleRadians = Math.acos(cosValue);
+          const angleDegrees = (angleRadians * 180) / Math.PI;
+
+          newCalculatedAngles.push({
+            x: intersectionPoint.x,
+            y: intersectionPoint.y,
+            angle: angleDegrees,
+          });
+        }
+      });
+    }
 
     setCalculateAnglesArray(newCalculatedAngles);
 
@@ -243,7 +377,14 @@ const Angle = ({
         handlePhotoAngleValues(newCalculatedAngles[0]);
       }
     }
-  }, [linePoints, angle, findIntersection, handlePhotoAngleValues]);
+  }, [
+    linePoints,
+    angle,
+    findIntersection,
+    handlePhotoAngleValues,
+    getVerticalLine,
+    getHorizontalLine,
+  ]);
 
   const updateLinePoints = useCallback(() => {
     if (!angle || !angle.Connections || !localPoints.length) return;
@@ -349,6 +490,40 @@ const Angle = ({
       }
     });
 
+    if (angle.ParalelLines) {
+      angle.ParalelLines.forEach((paraLine) => {
+        const atConn = angle.Connections[paraLine.atConnection];
+        if (!atConn) return;
+        const originIndex =
+          paraLine.atEnd === "start" ? atConn.startIndex : atConn.endIndex;
+        const originPt = localPoints.find((p) => p.index === originIndex);
+        if (
+          !originPt ||
+          typeof originPt.point.x !== "number" ||
+          typeof originPt.point.y !== "number"
+        )
+          return;
+
+        const refLine = newLinePoints[paraLine.parallelTo];
+        if (
+          !refLine ||
+          typeof refLine.start.x !== "number" ||
+          typeof refLine.start.y !== "number" ||
+          typeof refLine.end.x !== "number" ||
+          typeof refLine.end.y !== "number"
+        )
+          return;
+
+        const dx = refLine.end.x - refLine.start.x;
+        const dy = refLine.end.y - refLine.start.y;
+
+        newLinePoints.push({
+          start: { ...originPt.point },
+          end: { x: originPt.point.x + dx, y: originPt.point.y + dy },
+        });
+      });
+    }
+
     if (JSON.stringify(newLinePoints) !== JSON.stringify(linePoints)) {
       setLinePoints(newLinePoints);
     }
@@ -418,8 +593,71 @@ const Angle = ({
     ));
   }, [localPoints, stageScale, setPoint]);
 
+  const verticalLineComponent = useMemo(() => {
+    if (!angle.VerticalLines?.length) return null;
+    const vLine = getVerticalLine();
+    if (
+      !vLine ||
+      typeof vLine.start.x !== "number" ||
+      typeof vLine.start.y !== "number" ||
+      typeof vLine.end.x !== "number" ||
+      typeof vLine.end.y !== "number"
+    )
+      return null;
+    const sx = vLine.start.x;
+    const sy = vLine.start.y;
+    const ex = vLine.end.x;
+    const ey = vLine.end.y;
+    const baseStrokeWidth = 2;
+    const strokeWidth = baseStrokeWidth / Math.max(stageScale, 0.001);
+    return (
+      <KonvaLine
+        points={[sx, sy, ex, ey]}
+        stroke={lineColor}
+        strokeWidth={strokeWidth}
+        dash={[10 / stageScale, 6 / stageScale]}
+        shadowBlur={1}
+        shadowOpacity={0.5}
+        perfectDrawEnabled={false}
+        listening={false}
+      />
+    );
+  }, [angle.VerticalLines, getVerticalLine, stageScale, lineColor]);
+
+  const horizontalLineComponent = useMemo(() => {
+    if (!angle.HorizontalLines?.length) return null;
+    const hLine = getHorizontalLine();
+    if (
+      !hLine ||
+      typeof hLine.start.x !== "number" ||
+      typeof hLine.start.y !== "number" ||
+      typeof hLine.end.x !== "number" ||
+      typeof hLine.end.y !== "number"
+    )
+      return null;
+    const sx = hLine.start.x;
+    const sy = hLine.start.y;
+    const ex = hLine.end.x;
+    const ey = hLine.end.y;
+    const baseStrokeWidth = 2;
+    const strokeWidth = baseStrokeWidth / Math.max(stageScale, 0.001);
+    return (
+      <KonvaLine
+        points={[sx, sy, ex, ey]}
+        stroke={lineColor}
+        strokeWidth={strokeWidth}
+        shadowBlur={1}
+        shadowOpacity={0.5}
+        perfectDrawEnabled={false}
+        listening={false}
+      />
+    );
+  }, [angle.HorizontalLines, getHorizontalLine, stageScale, lineColor]);
+
   return (
     <>
+      {verticalLineComponent}
+      {horizontalLineComponent}
       {connections}
       {angleTexts}
       {pointComponents}
