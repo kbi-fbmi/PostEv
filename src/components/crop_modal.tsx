@@ -15,6 +15,7 @@ interface CropModalProps {
   fileCount: number;
   onConfirm: (crop: { x: number; y: number; width: number; height: number }) => Promise<void>;
   onSkip: () => void;
+  defaultStep?: "prompt" | "crop";
 }
 
 type HandleType = "move" | "tl" | "tr" | "bl" | "br" | "t" | "b" | "l" | "r" | "draw";
@@ -41,8 +42,9 @@ export function CropModal({
   fileCount,
   onConfirm,
   onSkip,
+  defaultStep = "prompt",
 }: CropModalProps) {
-  const [step, setStep] = useState<"prompt" | "crop">("prompt");
+  const [step, setStep] = useState<"prompt" | "crop">(defaultStep);
   const [applying, setApplying] = useState(false);
   const [imageUrl, setImageUrl] = useState("");
   const [crop, setCrop] = useState<CropRect>({ x: 0, y: 0, w: 1, h: 1 });

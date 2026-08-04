@@ -1,10 +1,12 @@
 import { cn } from "@/lib/utils";
 import { useState, forwardRef } from "react";
+import { useNavigate } from "react-router-dom";
 import ToolbarButton from "@/toolbar/toolbar_button";
 import { Tool } from "@/data/tools";
 import { useAppStore } from "@/store";
 import { ColorPicker } from "./ui/color_picker";
 import { ImageAdjust } from "./ui/image_adjust";
+import { IconCrop } from "@tabler/icons-react";
 
 interface ToolbarProps {
   className?: string;
@@ -17,6 +19,7 @@ const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(
   ({ className, tool, setTool, tools }, ref) => {
     const [isOpen, setIsOpen] = useState<string | null>(null);
     const { lineColor, setLineColor, data, view, setImageAdjust } = useAppStore();
+    const navigate = useNavigate();
 
     const photoManipulationTools = tools.find((t) => t.codeName === "photomanipulation")
     const photoSwitch = tools.find((t) => t.codeName === "photoswitch")
@@ -114,6 +117,15 @@ const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(
                 />
               </div>
             )}
+
+            <div className="mx-4 h-8 w-[1px] bg-border" />
+
+            <button
+              title="Preprocess"
+              onClick={() => navigate("/preprocess")}
+              className="flex h-8 w-8 items-center justify-center rounded transition-colors hover:bg-accent">
+              <IconCrop size={18} />
+            </button>
 
             <div className="mx-4 h-8 w-[1px] bg-border" />
 

@@ -1,71 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Routes, Route } from "react-router-dom";
 import Toolbar from "./components/toolbar";
 import FileDragNDrop from "./components/file_drag_n_drop";
 import Canvas from "./canvas";
 import NoFiles from "./components/no_files";
-import { Angles, CalculatedAngle, Data, PhotoAngleValues, Point } from "./types";
+import { Angles, CalculatedAngle, Point } from "./types";
 import { useAppStore } from "./store";
 import { Toaster } from "./components/ui/toaster";
 import { useToast } from "./hooks/use-toast";
-import { CropModal } from "./components/crop_modal";
+import PreprocessPage from "./pages/preprocess";
 
-async function getImageSize(
-  file: File
-): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve({ width: img.width, height: img.height });
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject();
-    };
-    img.src = url;
-  });
-}
-
-async function applyCropToFiles(
-  files: File[],
-  crop: { x: number; y: number; width: number; height: number }
-): Promise<File[]> {
-  return Promise.all(
-    files.map(async (file) => {
-      const img = new Image();
-      const url = URL.createObjectURL(file);
-      await new Promise<void>((res, rej) => {
-        img.onload = () => res();
-        img.onerror = rej;
-        img.src = url;
-      });
-      URL.revokeObjectURL(url);
-
-      const canvas = document.createElement("canvas");
-      canvas.width = crop.width;
-      canvas.height = crop.height;
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(img, -crop.x, -crop.y);
-
-      const blob = await new Promise<Blob>((res) =>
-        canvas.toBlob((b) => res(b!), file.type || "image/png")
-      );
-      const newFile = new File([blob], file.name, {
-        type: file.type || "image/png",
-      });
-      if (file.webkitRelativePath) {
-        Object.defineProperty(newFile, "webkitRelativePath", {
-          value: file.webkitRelativePath,
-          writable: false,
-        });
-      }
-      return newFile;
-    })
-  );
-}
-
-function App() {
+function MainView() {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<any>(null);
   const disableToolsInitializedRef = useRef(false);
@@ -81,11 +26,9 @@ function App() {
     download,
     zipDownload,
     zipProgress,
-    pendingImportResult,
     setToolbarHeight,
     changeTool,
     setFiles,
-    commitImportResult,
     setPoints,
     handlePhotoAngleValues,
     handleZipDownload,
@@ -95,123 +38,10 @@ function App() {
     handleDisableFilesTools,
   } = useAppStore();
 
-  const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
-  const [pendingImageSize, setPendingImageSize] = useState<{
-    width: number;
-    height: number;
-  } | null>(null);
-  const [pendingImportData, setPendingImportData] = useState<{
-    data: Data[];
-    photoAngleValues: PhotoAngleValues[];
-    zipName: string;
-  } | null>(null);
-
   const handleIncomingFiles = useCallback(
-    async (files: File[]) => {
-      if (files.length < 2) {
-        setFiles(files);
-        return;
-      }
-      try {
-        const sizes = await Promise.all(files.map(getImageSize));
-        const first = sizes[0];
-        const allSame = sizes.every(
-          (s) => s.width === first.width && s.height === first.height
-        );
-        if (!allSame) {
-          setFiles(files);
-          return;
-        }
-        setPendingFiles(files);
-        setPendingImageSize(first);
-      } catch {
-        setFiles(files);
-      }
-    },
+    (files: File[]) => setFiles(files),
     [setFiles]
   );
-
-  const handleCropConfirm = useCallback(
-    async (crop: { x: number; y: number; width: number; height: number }) => {
-      if (pendingImportData) {
-        const files = pendingImportData.data.map((d) => d.file);
-        const croppedFiles = await applyCropToFiles(files, crop);
-        const updatedData = pendingImportData.data.map((d, i) => ({
-          ...d,
-          file: croppedFiles[i],
-          cropped: true as const,
-          angle: d.angle
-            ? {
-                ...d.angle,
-                points: d.angle.points.map((p) =>
-                  p.x != null && p.y != null
-                    ? { ...p, x: p.x - crop.x, y: p.y - crop.y }
-                    : p
-                ),
-              }
-            : d.angle,
-        }));
-        const updatedPhotoAngleValues = pendingImportData.photoAngleValues.map((pav) => ({
-          ...pav,
-          angles: pav.angles.map((a) => ({
-            ...a,
-            value:
-              a.value.x != null && a.value.y != null
-                ? { ...a.value, x: a.value.x - crop.x, y: a.value.y - crop.y }
-                : a.value,
-          })),
-        }));
-        commitImportResult({ ...pendingImportData, data: updatedData, photoAngleValues: updatedPhotoAngleValues });
-        setPendingImportData(null);
-        setPendingImageSize(null);
-        return;
-      }
-      if (!pendingFiles) return;
-      const croppedFiles = await applyCropToFiles(pendingFiles, crop);
-      setPendingFiles(null);
-      setPendingImageSize(null);
-      setFiles(croppedFiles, true);
-    },
-    [pendingFiles, pendingImportData, setFiles, commitImportResult]
-  );
-
-  const handleCropSkip = useCallback(() => {
-    if (pendingImportData) {
-      const updatedData = pendingImportData.data.map((d) => ({ ...d, cropped: false as const }));
-      commitImportResult({ ...pendingImportData, data: updatedData });
-      setPendingImportData(null);
-      setPendingImageSize(null);
-      return;
-    }
-    if (!pendingFiles) return;
-    const files = pendingFiles;
-    setPendingFiles(null);
-    setPendingImageSize(null);
-    setFiles(files, false);
-  }, [pendingFiles, pendingImportData, setFiles, commitImportResult]);
-
-  useEffect(() => {
-    if (!pendingImportResult) return;
-    const files = pendingImportResult.data.map((d) => d.file);
-    if (files.length < 2) {
-      commitImportResult(pendingImportResult);
-      return;
-    }
-    Promise.all(files.map(getImageSize))
-      .then((sizes) => {
-        const first = sizes[0];
-        const allSame = sizes.every(
-          (s) => s.width === first.width && s.height === first.height
-        );
-        if (!allSame) {
-          commitImportResult(pendingImportResult);
-        } else {
-          setPendingImportData(pendingImportResult);
-          setPendingImageSize(first);
-        }
-      })
-      .catch(() => commitImportResult(pendingImportResult));
-  }, [pendingImportResult, commitImportResult]);
 
   useEffect(() => {
     const newHeight = toolbarRef.current?.clientHeight || 0;
@@ -372,17 +202,19 @@ function App() {
           </div>
         </div>
       )}
-      {(pendingFiles || pendingImportData) && pendingImageSize && (
-        <CropModal
-          file={(pendingImportData?.data[0].file ?? pendingFiles![0])}
-          imageSize={pendingImageSize}
-          fileCount={pendingImportData?.data.length ?? pendingFiles!.length}
-          onConfirm={handleCropConfirm}
-          onSkip={handleCropSkip}
-        />
-      )}
-      <Toaster />
     </div>
+  );
+}
+
+function App() {
+  return (
+    <>
+      <Routes>
+        <Route path="/" element={<MainView />} />
+        <Route path="/preprocess" element={<PreprocessPage />} />
+      </Routes>
+      <Toaster />
+    </>
   );
 }
 

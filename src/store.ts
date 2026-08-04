@@ -12,14 +12,9 @@ import toolsData, { Tool } from "./data/tools";
 import { anglesData } from "./angles";
 import { exportPhotosWithJson } from "./helpers/export";
 import { importPhotosWithJson } from "./helpers/import";
+import { applyCropToFiles } from "./helpers/crop";
 import JSZip from "jszip";
 import { OnUpdateCallback } from "jszip";
-
-interface PendingImportResult {
-  data: Data[];
-  photoAngleValues: PhotoAngleValues[];
-  zipName: string;
-}
 
 interface AppState {
   tool: string;
@@ -33,12 +28,11 @@ interface AppState {
   zipProgress: number;
   lineColor: string;
   importedZipName?: string;
-  pendingImportResult: PendingImportResult | null;
   setToolbarHeight: (height: number) => void;
   setTool: (tool: string) => void;
   changeTool: (tool: string) => void;
   setFiles: (files: File[], cropped?: boolean) => void;
-  commitImportResult: (result: PendingImportResult) => void;
+  applyPreprocessCrop: (crop: { x: number; y: number; width: number; height: number }) => Promise<void>;
   setPoints: (points: PointWithIndex[]) => void;
   handlePhotoAngleValues: (
     calculateAngle: CalculatedAngle,
@@ -100,7 +94,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   zipProgress: 0,
   lineColor: "#88fa2a",
   importedZipName: undefined,
-  pendingImportResult: null,
 
   setToolbarHeight: (height) => {
     if (get().toolbarHeight !== height) {
@@ -315,15 +308,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().handleDisableFilesTools(0);
   },
 
-  commitImportResult: (result) => {
-    set({
-      data: result.data,
-      view: { tool: "drag", index: 0 },
-      photoAngleValues: result.photoAngleValues,
-      importedZipName: result.zipName,
-      pendingImportResult: null,
-    });
-    get().handleDisableFilesTools(0);
+  applyPreprocessCrop: async (crop) => {
+    const { data, photoAngleValues } = get();
+    if (!data) return;
+    const croppedFiles = await applyCropToFiles(data.map((d) => d.file), crop);
+    const newData = data.map((d, i) => ({
+      ...d,
+      file: croppedFiles[i],
+      cropped: true as const,
+      angle: d.angle
+        ? {
+            ...d.angle,
+            points: d.angle.points.map((p) =>
+              p.x != null && p.y != null
+                ? { ...p, x: p.x - crop.x, y: p.y - crop.y }
+                : p
+            ),
+          }
+        : d.angle,
+    }));
+    const newPhotoAngleValues = photoAngleValues.map((pav) => ({
+      ...pav,
+      angles: pav.angles.map((a) => ({
+        ...a,
+        value:
+          a.value.x != null && a.value.y != null
+            ? { ...a.value, x: a.value.x - crop.x, y: a.value.y - crop.y }
+            : a.value,
+      })),
+    }));
+    set({ data: newData, photoAngleValues: newPhotoAngleValues });
   },
 
   setPoints: (points) => {
@@ -429,18 +443,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const importedZipName = file.name.replace(/\.zip$/i, "");
 
-      const needsCrop = newData.some((d) => d.cropped === undefined);
-      if (needsCrop) {
-        set({ pendingImportResult: { data: newData, photoAngleValues: importedAngleValues, zipName: importedZipName } });
-        return;
-      }
-
       set({
         data: newData,
         view: { tool: "drag", index: 0 },
         photoAngleValues: importedAngleValues,
         importedZipName,
-        pendingImportResult: null,
       });
       get().handleDisableFilesTools(0);
     } catch (e) {
