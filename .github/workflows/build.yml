@@ -1,0 +1,34 @@
+name: Build Release
+
+on:
+  push:
+    branches:
+      - main-kbidb
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+
+      - name: Package
+        run: |
+          tar -czf dist.tar.gz -C dist .
+          echo "${GITHUB_SHA}" > version.txt
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          files: |
+            dist.tar.gz
+            version.txt
