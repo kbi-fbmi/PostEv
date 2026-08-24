@@ -1,5 +1,6 @@
 import { Tool } from "@/data/tools";
 import { cn } from "@/lib/utils";
+import { basePath } from "@/base-path";
 
 interface ToolbarButtonProps {
   tool: Tool;
@@ -31,7 +32,7 @@ const ToolbarButton = ({
         title={tool.tooltip}>
         {typeof tool.image === "string" ? (
           <img
-            src={`/assets/${tool.image}`}
+            src={`${basePath}assets/${tool.image}`}
             alt={`${tool.name}`}
             width={24}
             height={24}
@@ -63,7 +64,7 @@ const ToolbarButton = ({
               title={childTool.tooltip}>
               {typeof childTool.image === "string" ? (
                 <img
-                  src={`/assets/${childTool.image}`}
+                  src={`${basePath}assets/${childTool.image}`}
                   alt={`${childTool.name}`}
                   width={24}
                   height={24}
