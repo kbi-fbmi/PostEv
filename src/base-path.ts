@@ -21,4 +21,6 @@
 // if it lived at src/lib/base-path.ts, stripping "one dir + one file" off
 // that only unwinds to "/src/", not "/". Keeping this file exactly as deep
 // as main.tsx keeps dev and prod computing the same thing.
-export const basePath = new URL(import.meta.url).pathname.replace(/[^/]+\/[^/]+$/, "");
+// The bundler can't (and shouldn't) resolve this statically — runtime
+// resolution is the whole point, so silence the build warning.
+export const basePath = new URL(/* @vite-ignore */ import.meta.url).pathname.replace(/[^/]+\/[^/]+$/, "");

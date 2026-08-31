@@ -6,7 +6,7 @@ export default defineConfig({
   base: "./",
   plugins: [react()],
   build: {
-    sourcemap: "inline", // Use 'inline' for the best debugging experience
+    sourcemap: true,
   },
   resolve: {
     alias: {

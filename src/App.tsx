@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Routes, Route } from "react-router-dom";
 import Toolbar from "./components/toolbar";
 import FileDragNDrop from "./components/file_drag_n_drop";
@@ -8,8 +8,9 @@ import { Angles, CalculatedAngle, Point } from "./types";
 import { useAppStore } from "./store";
 import { Toaster } from "./components/ui/toaster";
 import { useToast } from "./hooks/use-toast";
-import PreprocessPage from "./pages/preprocess";
 import { DicomRequiredModal } from "./components/dicom_required_modal";
+
+const PreprocessPage = lazy(() => import("./pages/preprocess"));
 
 function MainView() {
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -214,7 +215,14 @@ function App() {
     <>
       <Routes>
         <Route path="/" element={<MainView />} />
-        <Route path="/preprocess" element={<PreprocessPage />} />
+        <Route
+          path="/preprocess"
+          element={
+            <Suspense fallback={null}>
+              <PreprocessPage />
+            </Suspense>
+          }
+        />
       </Routes>
       <Toaster />
     </>
