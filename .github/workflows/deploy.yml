@@ -17,6 +17,6 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd ${{ secrets.DEPLOY_PATH }}
-            git pull origin main-kbidb
+            git pull origin dev-kbidb
             docker build -t postev:latest .
             docker compose up -d --force-recreate
