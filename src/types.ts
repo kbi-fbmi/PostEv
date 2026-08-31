@@ -1,10 +1,18 @@
+export type AngleType = "totalCC" | "upperCC" | "pisa" | "back" | "apicalVertebra" | "coronalBalance" | "sagittalBalance" | "thoricalSagittalAlignment" | "thoracolumbar" | "cebb" | "proximalThoracicCobb" | "mainThoracicCobb" | "thoracolumbarCobb";
+
 export interface Angle {
-  type: "totalCC" | "upperCC" | "pisa" | "back" | "apicalVertebra" | "coronalBalance" | "sagittalBalance" | "thoricalSagittalAlignment" | "thoracolumbar" | "cebb";
+  type: AngleType;
   Connections: Connection[];
   ShownedAngles: ShownedAngle[];
   ParalelLines?: ParalelLine[];
   VerticalLines?: ExtraLine[];
   HorizontalLines?: ExtraLine[];
+  /** Also measure the perpendicular gap from point `fromPointIndex` to
+   *  VerticalLines[0] / HorizontalLines[0] (e.g. a landmark to the C7 plumb
+   *  line). Reported in cm with DICOM pixel spacing, else px. */
+  LengthFrom?: { fromPointIndex: number; referenceLine: "vertical" | "horizontal" };
+  /** Hide the degree readout for length-only tools (e.g. ApVrt). */
+  HideAngle?: boolean;
 }
 
 /** Where a generated line should terminate. */
@@ -33,6 +41,11 @@ export interface UsedAngle {
   coronalBalance: boolean;
   sagittalBalance: boolean;
   thoricalSagittalAlignment: boolean;
+  thoracolumbar: boolean;
+  cebb: boolean;
+  proximalThoracicCobb: boolean;
+  mainThoracicCobb: boolean;
+  thoracolumbarCobb: boolean;
 }
 
 export interface ParalelLine {
@@ -77,6 +90,11 @@ export interface CalculatedAngle {
   x: number;
   y: number;
   angle: number;
+  /** Gap from Angle.LengthFrom to the plumb line, in mm. Set only when the
+   *  image has DICOM pixel spacing; otherwise see `lengthPx`. */
+  length?: number;
+  /** Same gap in raw pixels — set whenever Angle.LengthFrom is. */
+  lengthPx?: number;
 }
 
 export interface PointWithIndex {
@@ -93,6 +111,8 @@ export interface Data {
   brightness?: number;
   contrast?: number;
   cropped?: boolean;
+  pixelSpacingMm?: { row: number | null; column: number | null } | null;
+  pixelSpacingSource?: "PixelSpacing" | "ImagerPixelSpacing" | null;
 }
 
 export interface Angles {
@@ -106,6 +126,9 @@ export interface Angles {
   thoricalSagittalAlignment: Angle;
   thoracolumbar: Angle;
   cebb: Angle;
+  proximalThoracicCobb: Angle;
+  mainThoracicCobb: Angle;
+  thoracolumbarCobb: Angle;
   filename?: string;
   points: Point[];
 }
@@ -116,7 +139,7 @@ export interface View {
 }
 
 export interface AngleValues {
-  type: "totalCC" | "upperCC" | "pisa" | "back" | "apicalVertebra" | "coronalBalance" | "sagittalBalance" | "thoricalSagittalAlignment" | "thoracolumbar" | "cebb";
+  type: AngleType;
   value: CalculatedAngle;
 }
 

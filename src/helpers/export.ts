@@ -82,6 +82,9 @@ export const exportPhotosWithJson = async (
         originalPath: filePath,
         angleValues: relativeAngleValues,
         cropped: dataItem.cropped,
+        // Carry DICOM calibration through export → re-import so cm readouts survive.
+        pixelSpacingMm: dataItem.pixelSpacingMm ?? null,
+        pixelSpacingSource: dataItem.pixelSpacingSource ?? null,
       };
 
       zip.file(jsonFilePath, JSON.stringify(jsonData, null, 2));

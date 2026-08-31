@@ -6,7 +6,7 @@ import { Tool } from "@/data/tools";
 import { useAppStore } from "@/store";
 import { ColorPicker } from "./ui/color_picker";
 import { ImageAdjust } from "./ui/image_adjust";
-import { IconCrop } from "@tabler/icons-react";
+import { IconSettingsAutomation } from "@tabler/icons-react";
 
 interface ToolbarProps {
   className?: string;
@@ -120,12 +120,14 @@ const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(
 
             <div className="mx-4 h-8 w-[1px] bg-border" />
 
-            <button
-              title="Preprocess"
-              onClick={() => navigate("/preprocess")}
-              className="flex h-8 w-8 items-center justify-center rounded transition-colors hover:bg-accent">
-              <IconCrop size={18} />
-            </button>
+            <div className="flex items-center">
+              <button
+                className="p-1 cursor-pointer transition-opacity hover:opacity-50"
+                title="Preprocess"
+                onClick={() => navigate("/preprocess")}>
+                <IconSettingsAutomation width={30} height={30} stroke={1.5} />
+              </button>
+            </div>
 
             <div className="mx-4 h-8 w-[1px] bg-border" />
 
@@ -178,7 +180,7 @@ const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(
               </div>
 
               <div className="whitespace-nowrap">
-                <span className="mr-1">Angle:</span>
+                <span className="mr-1">Measurement:</span>
                 {data[view.index].lastSelectedAngleTool || "None"}
               </div>
 

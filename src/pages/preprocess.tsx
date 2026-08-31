@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import JSZip from "jszip";
 import { Button } from "@/components/ui/button";
 import {
   IconArrowLeft, IconLoader2, IconUpload, IconFolder,
-  IconCrop, IconFaceId, IconRun, IconDownload,
+  IconCrop, IconFaceId, IconRun, IconDownload, IconBodyScan,
 } from "@tabler/icons-react";
 import { cropFileRelative } from "@/helpers/crop";
-import { anglesData } from "@/angles";
+import { parseDicomToPng, isDicomFile, hasRequiredDicomGeometryAndSpacing, DicomConvertResult, readDicomMetadata } from "@/helpers/dicom";
+import { anglesData, defaultUsedAngle } from "@/angles";
 import { UsedAngle } from "@/types";
 import {
   calculatePoseAngle, confirmSidePose, findClosestPoint,
@@ -32,6 +33,30 @@ const pctToRect = (p: CropPct): CropRect =>
   clampCrop({ x: p.left/100, y: p.top/100, w: (100-p.left-p.right)/100, h: (100-p.top-p.bottom)/100 });
 
 interface FileEntry { file: File; path: string; }
+
+async function extractDicomZipEntries(file: File): Promise<FileEntry[]> {
+  const zip = await JSZip.loadAsync(file);
+  const extracted: FileEntry[] = [];
+
+  for (const [entryPath, zipEntry] of Object.entries(zip.files)) {
+    if (zipEntry.dir) continue;
+    const normalized = entryPath.replace(/\\/g, "/");
+    if (normalized.toUpperCase().endsWith("/DICOMDIR") || normalized === "DICOMDIR") continue;
+
+    const blob = await zipEntry.async("blob");
+    const browserFile = new File([blob], normalized.split("/").pop() || normalized, {
+      type: "application/octet-stream",
+    });
+
+    extracted.push({ file: browserFile, path: normalized });
+  }
+
+  const filtered = await Promise.all(
+    extracted.map(async (entry) => ({ entry, ok: await isDicomFile(entry.file) }))
+  );
+
+  return filtered.filter(({ ok }) => ok).map(({ entry }) => entry);
+}
 
 async function readEntryRecursive(
   entry: FileSystemEntry,
@@ -64,6 +89,9 @@ type PoseType = "front"|"back"|"left"|"right";
 
 interface BlurResult { entry: FileEntry; previewUrl: string; blob: Blob; faceCount: number; }
 
+interface DicomResult { entry: FileEntry; previewUrl: string; result: DicomConvertResult; }
+interface DicomError { path: string; message: string; }
+
 interface AnalysisResult {
   entry: FileEntry;
   imageW: number; imageH: number;
@@ -78,9 +106,12 @@ const MODEL_POSE = "https://storage.googleapis.com/mediapipe-models/pose_landmar
 
 export default function PreprocessPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [entries, setEntries] = useState<FileEntry[]>([]);
-  const [mode, setMode] = useState<"crop"|"face"|"posture">("crop");
+  const [mode, setMode] = useState<"crop"|"face"|"posture"|"dicom">(
+    searchParams.get("mode") === "dicom" ? "dicom" : "crop"
+  );
   const fileInputRef   = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -100,6 +131,11 @@ export default function PreprocessPage() {
   const [blurring, setBlurring] = useState(false);
   const [blurResults, setBlurResults] = useState<BlurResult[]>([]);
   const [blurIdx, setBlurIdx] = useState(0);
+  const [dicomProcessing, setDicomProcessing] = useState(false);
+  const [dicomProgress, setDicomProgress] = useState(0);
+  const [dicomResults, setDicomResults] = useState<DicomResult[]>([]);
+  const [dicomErrors, setDicomErrors] = useState<DicomError[]>([]);
+  const [dicomIdx, setDicomIdx] = useState(0);
   const modelsRef = useRef<{
     poseLandmarker?: import("@mediapipe/tasks-vision").PoseLandmarker;
   } | null>(null);
@@ -118,6 +154,10 @@ export default function PreprocessPage() {
   useEffect(() => {
     return () => { blurResults.forEach(r => URL.revokeObjectURL(r.previewUrl)); };
   }, [blurResults]);
+
+  useEffect(() => {
+    return () => { dicomResults.forEach(r => URL.revokeObjectURL(r.previewUrl)); };
+  }, [dicomResults]);
 
   useEffect(() => {
     if (mode === "crop") return;
@@ -162,14 +202,16 @@ export default function PreprocessPage() {
       if (e.key === "ArrowLeft") {
         if (mode === "posture") setResultIdx(i => Math.max(0, i - 1));
         else if (mode === "face") setBlurIdx(i => Math.max(0, i - 1));
+        else if (mode === "dicom") setDicomIdx(i => Math.max(0, i - 1));
       } else if (e.key === "ArrowRight") {
         if (mode === "posture") setResultIdx(i => Math.min(results.length - 1, i + 1));
         else if (mode === "face") setBlurIdx(i => Math.min(blurResults.length - 1, i + 1));
+        else if (mode === "dicom") setDicomIdx(i => Math.min(dicomResults.length - 1, i + 1));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mode, results.length, blurResults.length]);
+  }, [mode, results.length, blurResults.length, dicomResults.length]);
 
   const getRelPos = useCallback((cx: number, cy: number) => {
     const r = containerRef.current?.getBoundingClientRect();
@@ -243,28 +285,50 @@ export default function PreprocessPage() {
 
   const clearAll = () => {
     blurResults.forEach(r => URL.revokeObjectURL(r.previewUrl));
+    dicomResults.forEach(r => URL.revokeObjectURL(r.previewUrl));
     setEntries([]);
     setCrop({x:0,y:0,w:1,h:1});
     setResults([]); setResultIdx(0);
     setBlurResults([]); setBlurIdx(0);
+    setDicomResults([]); setDicomErrors([]); setDicomIdx(0);
   };
 
-  const loadEntries = (list: FileEntry[]) => {
-    const imgs = list.filter(e => isImageFile(e.file));
-    if (!imgs.length) return;
-    setEntries(imgs);
+  const loadEntries = async (list: FileEntry[], forMode: typeof mode) => {
+    const accepted = forMode === "dicom"
+      ? (await Promise.all(
+          list.map(async (entry) => ({ entry, ok: await isDicomFile(entry.file) }))
+        )).filter(({ ok }) => ok).map(({ entry }) => entry)
+      : list.filter((entry) => isImageFile(entry.file));
+
+    if (!accepted.length) return;
+    setEntries(accepted);
     setCrop({x:0,y:0,w:1,h:1});
     setResults([]); setResultIdx(0);
     setBlurResults([]); setBlurIdx(0);
+    setDicomResults([]); setDicomErrors([]); setDicomIdx(0);
   };
 
-  const handleFilePick = (files: FileList|null) => {
+  const handleFilePick = async (files: FileList|null) => {
     if (!files) return;
     const es: FileEntry[] = Array.from(files).map(f => ({
       file: f,
       path: (f as any).webkitRelativePath || f.name,
     }));
-    loadEntries(es);
+
+    if (mode === "dicom") {
+      const zipEntries = await Promise.all(
+        Array.from(files)
+          .filter((f) => /\.zip$/i.test(f.name))
+          .map(async (f) => extractDicomZipEntries(f))
+      );
+      const allZipEntries = zipEntries.flat();
+      if (allZipEntries.length) {
+        await loadEntries(allZipEntries, mode);
+        return;
+      }
+    }
+
+    await loadEntries(es, mode);
   };
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
@@ -276,12 +340,27 @@ export default function PreprocessPage() {
       .filter(Boolean) as FileSystemEntry[];
     const all: FileEntry[] = [];
     for (const fe of fsEntries) all.push(...(await readEntryRecursive(fe)));
-    if (all.length) loadEntries(all);
+
+    if (mode === "dicom" && !all.length) {
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      const zipEntries = await Promise.all(
+        droppedFiles
+          .filter((f) => /\.zip$/i.test(f.name))
+          .map(async (f) => extractDicomZipEntries(f))
+      );
+      const flattened = zipEntries.flat();
+      if (flattened.length) {
+        await loadEntries(flattened, mode);
+        return;
+      }
+    }
+
+    if (all.length) await loadEntries(all, mode);
     else {
       const files = Array.from(e.dataTransfer.files);
-      loadEntries(files.map(f => ({ file: f, path: f.name })));
+      await loadEntries(files.map(f => ({ file: f, path: f.name })), mode);
     }
-  }, []);
+  }, [mode]);
 
   const handlePctChange = (key: keyof CropPct, val: string) => {
     const n = parseFloat(val);
@@ -425,10 +504,7 @@ export default function PreprocessPage() {
         const n = norm(pt); points[idx] = { ...points[idx], x: n.x, y: n.y };
       };
 
-      const usedAngle: UsedAngle = {
-        totalCC: false, pisa: false, back: false, upperCC: false,
-        apicalVertebra: false, coronalBalance: false, sagittalBalance: false, thoricalSagittalAlignment: false,
-      };
+      const usedAngle: UsedAngle = { ...defaultUsedAngle };
       const angleValues: { type: string; value: { angle: number; x: number; y: number } }[] = [];
       let lastSelectedAngleTool: string | null = null;
 
@@ -494,6 +570,72 @@ export default function PreprocessPage() {
     const content = await zip.generateAsync({ type: "blob" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(content); a.download = "pose_analysis.zip";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  };
+
+  const processDicomFiles = async () => {
+    if (!entries.length) return;
+    setDicomProcessing(true); setDicomProgress(0);
+    dicomResults.forEach(r => URL.revokeObjectURL(r.previewUrl));
+    setDicomResults([]); setDicomErrors([]); setDicomIdx(0);
+
+    const newResults: DicomResult[] = [];
+    const newErrors: DicomError[] = [];
+
+    for (let i = 0; i < entries.length; i++) {
+      setDicomProgress(Math.round((i / entries.length) * 100));
+      const entry = entries[i];
+      try {
+        const buffer = await entry.file.arrayBuffer();
+        const meta = readDicomMetadata(new Uint8Array(buffer));
+        if (!hasRequiredDicomGeometryAndSpacing(meta)) {
+          newErrors.push({
+            path: entry.path,
+            message: "Skipped: missing image resolution or pixel spacing metadata",
+          });
+          continue;
+        }
+        const result = await parseDicomToPng(entry.file);
+        newResults.push({ entry, previewUrl: URL.createObjectURL(result.pngBlob), result });
+      } catch (e) {
+        newErrors.push({ path: entry.path, message: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    setDicomProgress(100);
+    setDicomResults(newResults);
+    setDicomErrors(newErrors);
+    setDicomIdx(0);
+    setDicomProcessing(false);
+  };
+
+  const downloadDicomZip = async () => {
+    if (!dicomResults.length) return;
+    const zip = new JSZip();
+    for (const { entry, result } of dicomResults) {
+      const fname = entry.file.name;
+      const m = fname.match(/(.+)\.([^/.]+)$/);
+      const base = m ? m[1] : fname;
+      const dir = entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "";
+      const pngPath  = dir ? `${dir}/${base}.png`  : `${base}.png`;
+      const jsonPath = dir ? `${dir}/${base}.json` : `${base}.json`;
+
+      zip.file(pngPath, result.pngBlob);
+      zip.file(jsonPath, JSON.stringify({
+        // Keeps the PNG's name stable when this ZIP is imported into the main app.
+        filename: `${base}.png`,
+        sourceFile: entry.path,
+        resolution: { width: result.columns, height: result.rows },
+        // mm per pixel, e.g. { row: 0.2, column: 0.2 } means 1px = 0.2mm.
+        pixelSpacingMm: { row: result.rowSpacingMm, column: result.columnSpacingMm },
+        pixelSpacingSource: result.spacingSource,
+        transferSyntax: result.transferSyntax,
+      }, null, 2));
+    }
+    const content = await zip.generateAsync({ type: "blob" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(content); a.download = "dicom_export.zip";
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
   };
@@ -638,7 +780,7 @@ export default function PreprocessPage() {
       onDragLeave={()=>setDragOver(false)}>
       <div className="flex flex-col items-center gap-1.5 px-4 py-4 text-muted-foreground">
         <IconUpload size={20}/>
-        <span className="text-xs text-center">Drop images or folders here</span>
+        <span className="text-xs text-center">{mode==="dicom" ? "Drop .dcm files or folders here" : "Drop images or folders here"}</span>
       </div>
       <div className="flex border-t border-border">
         <button
@@ -653,7 +795,7 @@ export default function PreprocessPage() {
           <IconFolder size={12}/> Folder
         </button>
       </div>
-      <input ref={fileInputRef} type="file" multiple accept="image/*" className="hidden"
+      <input ref={fileInputRef} type="file" multiple accept={mode==="dicom" ? ".dcm,.dicom,.zip" : "image/*"} className="hidden"
         onChange={e=>{handleFilePick(e.target.files); e.target.value="";}}/>
       <input ref={folderInputRef} type="file" multiple className="hidden"
         {...{webkitdirectory:"", mozdirectory:""} as any}
@@ -663,7 +805,7 @@ export default function PreprocessPage() {
 
   const fileList = entries.length > 0 && (
     <div className="space-y-0.5">
-      <div className="text-xs text-muted-foreground">{entries.length} image{entries.length!==1?"s":""}</div>
+      <div className="text-xs text-muted-foreground">{entries.length} {mode==="dicom"?"file":"image"}{entries.length!==1?"s":""}</div>
       <div className="max-h-24 overflow-y-auto rounded border border-border bg-muted/30 p-2 text-xs text-muted-foreground space-y-0.5">
         {entries.map((e,i)=><div key={i} className="truncate" title={e.path}>{e.path}</div>)}
       </div>
@@ -679,7 +821,7 @@ export default function PreprocessPage() {
         <span className="font-semibold">Preprocess</span>
         {entries.length>0 && (
           <>
-            <span className="text-sm text-muted-foreground">{entries.length} image{entries.length!==1?"s":""}</span>
+            <span className="text-sm text-muted-foreground">{entries.length} {mode==="dicom"?"file":"image"}{entries.length!==1?"s":""}</span>
             <Button variant="ghost" size="sm" onClick={clearAll} className="text-muted-foreground hover:text-foreground">Clear</Button>
           </>
         )}
@@ -695,6 +837,10 @@ export default function PreprocessPage() {
           <button onClick={()=>setMode("posture")}
             className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors ${mode==="posture"?"bg-primary text-primary-foreground":"hover:bg-muted"}`}>
             <IconRun size={14}/> Posture
+          </button>
+          <button onClick={()=>setMode("dicom")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors ${mode==="dicom"?"bg-primary text-primary-foreground":"hover:bg-muted"}`}>
+            <IconBodyScan size={14}/> DICOM
           </button>
         </div>
       </div>
@@ -779,7 +925,7 @@ export default function PreprocessPage() {
                 )}
               </div>
             </>
-          ) : (
+          ) : mode==="posture" ? (
             <>
               {analyzing && (
                 <div className="space-y-1">
@@ -836,6 +982,86 @@ export default function PreprocessPage() {
                 {results.length>0 && (
                   <Button variant="outline" className="w-full" onClick={downloadPoseZip}>
                     <span className="flex items-center gap-2"><IconDownload size={16}/>Save ZIP for Main App</span>
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {dicomProcessing && (
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">{dicomProgress}%</div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div className="h-full bg-primary transition-all" style={{width:`${dicomProgress}%`}}/>
+                  </div>
+                </div>
+              )}
+
+              {(dicomResults.length>0 || dicomErrors.length>0) && (
+                <div className="rounded bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{dicomResults.length}</span> converted
+                  {dicomErrors.length>0 && <>, <span className="font-medium text-red-500">{dicomErrors.length}</span> failed</>}
+                </div>
+              )}
+
+              {dicomResults.length>0 && (
+                <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium uppercase text-muted-foreground">{dicomIdx+1}/{dicomResults.length}</span>
+                    <div className="flex gap-1">
+                      <button disabled={dicomIdx===0} onClick={()=>setDicomIdx(i=>i-1)} className="rounded px-1.5 py-0.5 text-xs hover:bg-muted disabled:opacity-40">◀</button>
+                      <button disabled={dicomIdx===dicomResults.length-1} onClick={()=>setDicomIdx(i=>i+1)} className="rounded px-1.5 py-0.5 text-xs hover:bg-muted disabled:opacity-40">▶</button>
+                    </div>
+                  </div>
+                  {(()=>{
+                    const d = dicomResults[dicomIdx];
+                    return (
+                      <>
+                        <div className="truncate text-xs text-muted-foreground" title={d.entry.path}>{d.entry.path}</div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Resolution</span>
+                          <span className="font-semibold tabular-nums">{d.result.columns}×{d.result.rows}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Pixel size</span>
+                          <span className="font-semibold tabular-nums">
+                            {d.result.rowSpacingMm!=null && d.result.columnSpacingMm!=null
+                              ? `${d.result.rowSpacingMm.toFixed(3)} × ${d.result.columnSpacingMm.toFixed(3)} mm`
+                              : "unknown"}
+                          </span>
+                        </div>
+                        {d.result.spacingSource==="ImagerPixelSpacing" && (
+                          <div className="text-xs text-amber-500">Uncalibrated (detector) spacing — no PixelSpacing tag found</div>
+                        )}
+                        {d.result.spacingSource===null && (
+                          <div className="text-xs text-red-500">No pixel spacing found in this file</div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {dicomErrors.length>0 && (
+                <div className="max-h-40 overflow-y-auto rounded border border-red-500/30 bg-red-500/5 p-2 text-xs text-red-500 space-y-1.5">
+                  {dicomErrors.map((e,i)=>(
+                    <div key={i} className="break-words">
+                      <div className="font-medium">{e.path}</div>
+                      <div>{e.message}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-auto flex flex-col gap-2">
+                <Button className="w-full" disabled={!entries.length||dicomProcessing} onClick={processDicomFiles}>
+                  {dicomProcessing
+                    ? <span className="flex items-center gap-2"><IconLoader2 size={16} className="animate-spin"/>Converting…</span>
+                    : <span className="flex items-center gap-2"><IconBodyScan size={16}/>Convert All</span>}
+                </Button>
+                {dicomResults.length>0 && (
+                  <Button variant="outline" className="w-full" onClick={downloadDicomZip}>
+                    <span className="flex items-center gap-2"><IconDownload size={16}/>Download ZIP</span>
                   </Button>
                 )}
               </div>
@@ -897,12 +1123,28 @@ export default function PreprocessPage() {
               />
               <canvas ref={overlayRef} className="pointer-events-none absolute inset-0"/>
             </div>
+          ) : mode==="dicom" && dicomResults[dicomIdx] ? (
+            <div className="relative select-none">
+              <img
+                key={dicomResults[dicomIdx].entry.path+dicomIdx}
+                src={dicomResults[dicomIdx].previewUrl}
+                alt="converted DICOM preview"
+                className="pointer-events-none block max-h-[80vh] max-w-full"
+                draggable={false}
+              />
+              <div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-xs text-white">
+                {dicomResults[dicomIdx].result.rowSpacingMm!=null && dicomResults[dicomIdx].result.columnSpacingMm!=null
+                  ? `1px ≈ ${dicomResults[dicomIdx].result.rowSpacingMm!.toFixed(3)} × ${dicomResults[dicomIdx].result.columnSpacingMm!.toFixed(3)} mm`
+                  : "no pixel spacing in file"}
+              </div>
+            </div>
           ) : (
             <div className="flex flex-col items-center gap-2 text-muted-foreground">
               <IconUpload size={32} className="opacity-30"/>
               <span className="text-sm">
                 {mode==="posture" ? "Load images and click Analyze All"
                   : mode==="face" ? "Load images and click Blur Faces (Preview)"
+                  : mode==="dicom" ? "Load .dcm files and click Convert All"
                   : "Load images or a folder to preview"}
               </span>
             </div>

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   Angles,
+  AngleType,
   Data,
   PhotoAngleValues,
   PointWithIndex,
@@ -9,7 +10,8 @@ import {
   CalculatedAngle,
 } from "./types";
 import toolsData, { Tool } from "./data/tools";
-import { anglesData } from "./angles";
+import { anglesData, defaultUsedAngle } from "./angles";
+import { DICOM_REQUIRED_TOOLS, hasValidPixelSpacing } from "./helpers/pixelSpacing";
 import { exportPhotosWithJson } from "./helpers/export";
 import { importPhotosWithJson } from "./helpers/import";
 import { applyCropToFiles } from "./helpers/crop";
@@ -28,6 +30,10 @@ interface AppState {
   zipProgress: number;
   lineColor: string;
   importedZipName?: string;
+  /** codeName of the length tool blocked for lack of DICOM calibration; drives
+   *  the prompt modal, null when closed. */
+  dicomRequiredTool: string | null;
+  setDicomRequiredTool: (tool: string | null) => void;
   setToolbarHeight: (height: number) => void;
   setTool: (tool: string) => void;
   changeTool: (tool: string) => void;
@@ -94,6 +100,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   zipProgress: 0,
   lineColor: "#88fa2a",
   importedZipName: undefined,
+  dicomRequiredTool: null,
+
+  setDicomRequiredTool: (tool) => set({ dicomRequiredTool: tool }),
 
   setToolbarHeight: (height) => {
     if (get().toolbarHeight !== height) {
@@ -115,6 +124,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   changeTool: async (tool) => {
     const { data, view } = get();
+
+    // Length tools need DICOM calibration — block selection and prompt instead.
+    if (
+      (DICOM_REQUIRED_TOOLS as readonly string[]).includes(tool) &&
+      data?.[view.index] &&
+      !hasValidPixelSpacing(data[view.index].pixelSpacingMm)
+    ) {
+      set({ dicomRequiredTool: tool });
+      return;
+    }
 
     if (tool === "downloadImage") {
       set({ download: true });
@@ -200,7 +219,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               set({ tool: childTool.codeName });
               if (childTool.angle) {
                 const { data, view } = get();
-                if (!data) return;
+                if (!data || !data[view.index]) return;
                 const newData = [...data];
                 newData[view.index].lastSelectedAngleTool =
                   childTool.codeName;
@@ -216,7 +235,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       if (toolFound.angle) {
         const { data, view } = get();
-        if (!data) return;
+        if (!data || !data[view.index]) return;
         const newData = [...data];
         newData[view.index].lastSelectedAngleTool = tool;
         newData[view.index].usedAngle[tool as keyof UsedAngle] = true;
@@ -292,7 +311,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           filename: file.name,
         },
         isFlipped: false,
-        usedAngle: { totalCC: false, pisa: false, back: false, upperCC: false, apicalVertebra: false, coronalBalance: false, sagittalBalance: false, thoricalSagittalAlignment: false },
+        usedAngle: { ...defaultUsedAngle },
         lastSelectedAngleTool: null,
         cropped,
       });
@@ -381,9 +400,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       (angle) => angle.type !== angleTool
     );
 
-    if (["totalCC", "pisa", "back", "upperCC", "apicalVertebra", "coronalBalance", "sagittalBalance", "thoricalSagittalAlignment"].includes(angleTool)) {
+    const knownAngleTools = [
+      "totalCC", "pisa", "back", "upperCC", "apicalVertebra", "coronalBalance",
+      "sagittalBalance", "thoricalSagittalAlignment", "thoracolumbar", "cebb",
+      "proximalThoracicCobb", "mainThoracicCobb", "thoracolumbarCobb",
+    ];
+    if (knownAngleTools.includes(angleTool)) {
       updatedAngles.push({
-        type: angleTool as "totalCC" | "pisa" | "back" | "upperCC" | "apicalVertebra" | "coronalBalance" | "sagittalBalance" | "thoricalSagittalAlignment",
+        type: angleTool as AngleType,
         value: calculateAngle,
       });
     }
@@ -396,7 +420,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { data, photoAngleValues } = get();
     if (!data || !photoAngleValues || photoAngleValues.length === 0) return;
 
-    let csvContent = "Photo Name,Angle Name,Angle Value\n";
+    const hasPixelSpacing = data.some((d) => hasValidPixelSpacing(d.pixelSpacingMm));
+
+    let csvContent = hasPixelSpacing
+      ? "Photo Name,Angle Name,Angle Value (deg),Length (cm)\n"
+      : "Photo Name,Angle Name,Angle Value (deg)\n";
     for (let idx = 0; idx < photoAngleValues.length; idx++) {
       const photo = photoAngleValues[idx];
       const fileData = data[idx];
@@ -408,8 +436,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         photo.angles.forEach((angle) => {
           const photoName = fileData.file.name;
           const angleName = angle.type;
-          const angleValue = angle.value.angle.toFixed(2);
-          csvContent += `${photoName},${angleName},${angleValue}\n`;
+          // HideAngle tools (ApVrt) have no meaningful degree value — blank cell.
+          const angleDef = anglesData[angle.type as keyof typeof anglesData] as
+            | { HideAngle?: boolean }
+            | undefined;
+          const angleValue = angleDef?.HideAngle
+            ? ""
+            : angle.value.angle.toFixed(2);
+          const length =
+            hasPixelSpacing && typeof angle.value.length === "number"
+              ? (angle.value.length / 10).toFixed(2)
+              : "";
+          csvContent += hasPixelSpacing
+            ? `${photoName},${angleName},${angleValue},${length}\n`
+            : `${photoName},${angleName},${angleValue}\n`;
         });
       }
 

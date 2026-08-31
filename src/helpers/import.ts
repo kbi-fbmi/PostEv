@@ -1,5 +1,25 @@
 import JSZip from "jszip";
-import { Data, PhotoAngleValues } from "../types";
+import { Angles, Data, PhotoAngleValues } from "../types";
+import { anglesData, defaultUsedAngle } from "../angles";
+
+// Old ZIPs predate newer tools/points; importing them verbatim leaves keys
+// missing and crashes the canvas on tool select. Merge onto current defaults:
+// saved values win, anything missing falls back.
+function mergeAngleWithDefaults(saved: unknown): Angles {
+  const savedAngle = (saved && typeof saved === "object" ? saved : {}) as Partial<Angles> & {
+    points?: unknown;
+  };
+  const savedPoints = Array.isArray(savedAngle.points) ? savedAngle.points : [];
+  return {
+    ...anglesData,
+    ...savedAngle,
+    points: anglesData.points.map((defaultPoint, i) => savedPoints[i] ?? defaultPoint),
+  } as Angles;
+}
+
+function mergeUsedAngleWithDefaults(saved: unknown) {
+  return { ...defaultUsedAngle, ...(saved && typeof saved === "object" ? saved : {}) };
+}
 
 export const importPhotosWithJson = async (
   file: File
@@ -127,11 +147,13 @@ export const importPhotosWithJson = async (
 
       newData.push({
         file: reconstructedFile,
-        angle: metadata.angle,
+        angle: mergeAngleWithDefaults(metadata.angle),
         isFlipped: metadata.isFlipped,
-        usedAngle: metadata.usedAngle,
+        usedAngle: mergeUsedAngleWithDefaults(metadata.usedAngle),
         lastSelectedAngleTool: metadata.lastSelectedAngleTool,
         cropped: metadata.cropped,
+        pixelSpacingMm: metadata.pixelSpacingMm || null,
+        pixelSpacingSource: metadata.pixelSpacingSource || null,
       });
 
       newPhotoAngleValues.push({

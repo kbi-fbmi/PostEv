@@ -21,7 +21,10 @@ const ToolbarButton = ({
   return (
     <div className={cn("flex items-center justify-center", isOpen && "gap-2", activeTool === tool.codeName && "border-b-2")}>
       {!tool.hideTool && <button
-        className="p-1"
+        className={cn(
+          "p-1 cursor-pointer transition-opacity hover:opacity-50",
+          tool.disabled && "cursor-not-allowed opacity-50 hover:opacity-50"
+        )}
         onClick={() => {
           if (!tool.children) {
             onClickSet(tool.codeName);
@@ -34,8 +37,8 @@ const ToolbarButton = ({
           <img
             src={`${basePath}assets/${tool.image}`}
             alt={`${tool.name}`}
-            width={24}
-            height={24}
+            width={tool.imageSize ?? 24}
+            height={tool.imageSize ?? 24}
           />
         ) : tool.image ? (
           tool.image && <tool.image width={30} height={30} stroke={1.5} />
@@ -55,8 +58,10 @@ const ToolbarButton = ({
               key={childTool.codeName}
               className={cn(
                 "text-nowrap",
-                childTool.disabled && "opacity-50 cursor-not-allowed"
-                , activeTool === childTool.codeName && "border-b-2"
+                childTool.disabled
+                  ? "opacity-50 cursor-not-allowed"
+                  : "cursor-pointer transition-opacity hover:opacity-50",
+                activeTool === childTool.codeName && "border-b-2"
               )}
               onClick={() => {
                 childTool.disabled ? null : onClickSet(childTool.codeName);

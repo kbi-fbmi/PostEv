@@ -8,6 +8,7 @@ import {
   PointWithIndex,
 } from "./types";
 import Angle from "./canvas/angle";
+import { hasValidPixelSpacing } from "./helpers/pixelSpacing";
 import { throttle } from "lodash";
 
 interface CanvasProps {
@@ -26,6 +27,7 @@ interface CanvasProps {
   handlePhotoAngleValues: (calculateAngle: CalculatedAngle) => void;
   brightness?: number;
   contrast?: number;
+  pixelSpacingMm?: { row: number | null; column: number | null } | null;
 }
 
 const Canvas: React.FC<CanvasProps> = ({
@@ -44,6 +46,7 @@ const Canvas: React.FC<CanvasProps> = ({
   stageRef,
   brightness = 100,
   contrast = 100,
+  pixelSpacingMm = null,
 }) => {
   const [image, setImage] = useState<HTMLImageElement | undefined>();
   const [scale, setScale] = useState<number>(1);
@@ -215,10 +218,13 @@ const Canvas: React.FC<CanvasProps> = ({
 
   const AngleComponent = useMemo(() => {
     if (!angles || !lastAngleTool) return null;
+    // Older imports / stale HMR can leave this tool's config missing — bail instead of crashing <Angle>.
+    const currentAngle = angles[lastAngleTool as keyof Angles] as AngleType | undefined;
+    if (!currentAngle) return null;
 
     return (
       <Angle
-        angle={angles[lastAngleTool as keyof Angles] as AngleType}
+        angle={currentAngle}
         points={points}
         curIndex={curIndex}
         photoMax={{ x: 100, y: 100 }}
@@ -227,6 +233,7 @@ const Canvas: React.FC<CanvasProps> = ({
         photoSize={photoSize}
         handlePhotoAngleValues={handlePhotoAngleValues}
         stageScale={scale}
+        pixelSpacingMm={pixelSpacingMm}
       />
     );
   }, [
@@ -239,33 +246,58 @@ const Canvas: React.FC<CanvasProps> = ({
     scale,
     photoSize,
     handlePhotoAngleValues,
+    pixelSpacingMm,
   ]);
 
+  const showSpacingBadge = hasValidPixelSpacing(pixelSpacingMm);
+
   return (
-    <Stage
-      ref={stageRef}
-      draggable={tool === "drag"}
-      width={window.innerWidth}
-      height={window.innerHeight - toolbarHeight}
-      scaleX={scale}
-      scaleY={scale}
-      x={position.x}
-      y={position.y}
-      onWheel={handleWheel}
-      perfectDrawEnabled={false}>
-      <Layer>
-        <KonvaImage
-          image={filteredImage}
-          scaleX={isFlipped ? -1 : 1}
-          x={isFlipped ? image?.width || 0 : 0}
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
-          listening={tool === "drag"}
-          perfectDrawEnabled={false}
-        />
-        {AngleComponent}
-      </Layer>
-    </Stage>
+    <>
+      <Stage
+        ref={stageRef}
+        draggable={tool === "drag"}
+        width={window.innerWidth}
+        height={window.innerHeight - toolbarHeight}
+        scaleX={scale}
+        scaleY={scale}
+        x={position.x}
+        y={position.y}
+        onWheel={handleWheel}
+        perfectDrawEnabled={false}>
+        <Layer>
+          <KonvaImage
+            image={filteredImage}
+            scaleX={isFlipped ? -1 : 1}
+            x={isFlipped ? image?.width || 0 : 0}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            listening={tool === "drag"}
+            perfectDrawEnabled={false}
+          />
+          {AngleComponent}
+        </Layer>
+      </Stage>
+      {/* Plain DOM sibling — react-konva can't host HTML inside the Stage. */}
+      {showSpacingBadge && pixelSpacingMm && (
+        <div
+          style={{
+            position: "fixed",
+            left: 12,
+            bottom: 12,
+            padding: "6px 8px",
+            borderRadius: 8,
+            background: "rgba(0,0,0,0.7)",
+            color: "white",
+            fontSize: 12,
+            lineHeight: 1.35,
+            pointerEvents: "none",
+            zIndex: 10,
+          }}
+        >
+          1px ≈ {pixelSpacingMm.row!.toFixed(3)} × {pixelSpacingMm.column!.toFixed(3)} mm
+        </div>
+      )}
+    </>
   );
 };
 

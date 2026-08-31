@@ -1,13 +1,12 @@
 import {
   Icon,
-  IconBodyScan,
   IconBookDownload,
   IconCaretLeft,
   IconCaretRight,
   IconDownload,
   IconFileSpreadsheet,
   IconFlipVertical,
-  IconHandStop,
+  IconZoomPan,
   IconImageInPicture,
   IconProps,
   IconTrash,
@@ -25,6 +24,8 @@ export interface Tool {
   tooltip?: string;
   hideTool?: boolean;
   groupToggle?: boolean;
+  /** px size for a string (SVG) icon; defaults to 24. */
+  imageSize?: number;
 }
 
 export interface ChildTool {
@@ -45,7 +46,7 @@ const tools: Tool[] = [
       {
         name: "Drag",
         codeName: "drag",
-        image: IconHandStop,
+        image: IconZoomPan,
         tooltip: "Drag",
       },
       {
@@ -126,44 +127,64 @@ const tools: Tool[] = [
   {
     name: "XRAY",
     codeName: "xray",
-    image: IconBodyScan,
+    image: "xray.svg",
+    imageSize: 34,
     groupToggle: true,
+    // AP-film measurements first, then lateral-film.
     children: [
-      {
-        angle: true,
-        name: "ApVrt",
-        codeName: "apicalVertebra",
-        tooltip: "Apical Vertebra (Cobb angle)",
-      },
       {
         angle: true,
         name: "CorBl",
         codeName: "coronalBalance",
-        tooltip: "Coronal Balance",
+        tooltip: "Coronal Balance: C7 midpoint + S1 midpoint — angle vs. vertical and horizontal gap from the C7 plumb line",
+      },
+      {
+        angle: true,
+        name: "ApVrt",
+        codeName: "apicalVertebra",
+        tooltip: "Apical Vertebra: C7 midpoint + midpoint of the most laterally deviated thoracic vertebra — reports the horizontal gap from the C7 plumb line",
+      },
+      {
+        angle: true,
+        name: "CorCob",
+        codeName: "cebb",
+        tooltip: "Coronal Cobb (main curve): I-J along the upper endplate of the upper end vertebra, K-L along the upper endplate of the lower end vertebra",
+      },
+      {
+        angle: true,
+        name: "PTCob",
+        codeName: "proximalThoracicCobb",
+        tooltip: "Proximal Thoracic Cobb: M-N along the upper endplate of Th1, O-P along the lower endplate of Th3",
+      },
+      {
+        angle: true,
+        name: "MTCob",
+        codeName: "mainThoracicCobb",
+        tooltip: "Main Thoracic Cobb: Q-R along the upper endplate of Th3, S-T along the lower endplate of Th12",
+      },
+      {
+        angle: true,
+        name: "TLCob",
+        codeName: "thoracolumbarCobb",
+        tooltip: "Thoracolumbar Cobb: U-V along the upper endplate of Th12, W-X along the lower endplate of L4",
       },
       {
         angle: true,
         name: "SagBl",
         codeName: "sagittalBalance",
-        tooltip: "Sagittal Balance",
+        tooltip: "Sagittal Balance: C7 midpoint + posterosuperior corner of S1 — angle vs. horizontal and horizontal gap (SVA) from the C7 plumb line",
       },
       {
         angle: true,
         name: "ThSAl",
         codeName: "thoricalSagittalAlignment",
-        tooltip: "Thorical Sagittal Alignment",
+        tooltip: "Thoracic Sagittal Alignment: A-B along the upper endplate of Th2, C-D along the lower endplate of Th12 — thoracic kyphosis",
       },
       {
         angle: true,
-        name: "ThLmb",
+        name: "LSAl",
         codeName: "thoracolumbar",
-        tooltip: "Thoracolumbar",
-      },
-      {
-        angle: true,
-        name: "Cobb",
-        codeName: "cebb",
-        tooltip: "Cobb",
+        tooltip: "Lumbar Sagittal Alignment: E-F along the upper endplate of Th12, G-H along the upper endplate of S1 — lumbar lordosis",
       },
     ],
   },

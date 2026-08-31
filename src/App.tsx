@@ -9,6 +9,7 @@ import { useAppStore } from "./store";
 import { Toaster } from "./components/ui/toaster";
 import { useToast } from "./hooks/use-toast";
 import PreprocessPage from "./pages/preprocess";
+import { DicomRequiredModal } from "./components/dicom_required_modal";
 
 function MainView() {
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -180,6 +181,7 @@ function MainView() {
               handlePhotoAngleValues={handleCanvasPhotoAngleValues}
               brightness={data[view.index].brightness ?? 100}
               contrast={data[view.index].contrast ?? 100}
+              pixelSpacingMm={data[view.index].pixelSpacingMm ?? null}
             />
           </>
         )}
@@ -189,6 +191,7 @@ function MainView() {
           open={tool === "file"}
         />
       </div>
+      <DicomRequiredModal />
       {zipDownload && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
           <div className="rounded-lg bg-white p-4">

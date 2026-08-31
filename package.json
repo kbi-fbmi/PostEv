@@ -21,6 +21,7 @@
     "@vitejs/plugin-react-swc": "^3.7.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dicom-parser": "^1.8.21",
     "jszip": "^3.10.1",
     "konva": "^9.3.16",
     "lodash": "^4.17.21",

@@ -18,6 +18,7 @@ import Connection from "./connection";
 import { Line as KonvaLine, Text } from "react-konva";
 import { throttle } from "lodash";
 import { useAppStore } from "@/store";
+import { hasValidPixelSpacing } from "@/helpers/pixelSpacing";
 
 interface AngleProps {
   angle: AngleType;
@@ -35,6 +36,7 @@ interface AngleProps {
   };
   handlePhotoAngleValues: (calculateAngle: CalculatedAngle) => void;
   stageScale: number;
+  pixelSpacingMm?: { row: number | null; column: number | null } | null;
 }
 
 const Angle = ({
@@ -46,6 +48,7 @@ const Angle = ({
   photoSize,
   handlePhotoAngleValues,
   stageScale,
+  pixelSpacingMm = null,
 }: AngleProps) => {
   const { lineColor } = useAppStore();
   const [linePoints, setLinePoints] = useState<Line[]>([]);
@@ -226,10 +229,52 @@ const Angle = ({
   }, [angle, localPoints, photoSize.width, resolveHorizontalLimit]);
 
 
+  // Perpendicular gap from the `LengthFrom` point to the plumb line, in px and
+  // (if calibrated) mm. Horizontal gap scales by column spacing, vertical by row.
+  const computeLength = useCallback(():
+    | { px: number; mm: number | null }
+    | undefined => {
+    if (!angle.LengthFrom) return undefined;
+    const pt = localPoints.find((p) => p.index === angle.LengthFrom!.fromPointIndex);
+    if (!pt || typeof pt.point.x !== "number" || typeof pt.point.y !== "number")
+      return undefined;
+
+    const pxLength =
+      angle.LengthFrom.referenceLine === "vertical"
+        ? (() => {
+            const vLine = getVerticalLine();
+            if (!vLine || typeof vLine.start.x !== "number") return undefined;
+            return Math.abs(pt.point.x - vLine.start.x);
+          })()
+        : (() => {
+            const hLine = getHorizontalLine();
+            if (!hLine || typeof hLine.start.y !== "number") return undefined;
+            return Math.abs(pt.point.y - hLine.start.y);
+          })();
+
+    if (typeof pxLength !== "number") return undefined;
+
+    if (!hasValidPixelSpacing(pixelSpacingMm)) {
+      return { px: pxLength, mm: null };
+    }
+
+    const spacing =
+      angle.LengthFrom.referenceLine === "vertical"
+        ? pixelSpacingMm.column
+        : pixelSpacingMm.row;
+
+    if (typeof spacing === "number" && !Number.isNaN(spacing) && spacing > 0) {
+      return { px: pxLength, mm: pxLength * spacing };
+    }
+
+    return { px: pxLength, mm: null };
+  }, [angle, localPoints, getVerticalLine, getHorizontalLine, pixelSpacingMm]);
+
   const calculateAngles = useCallback(() => {
     if (!angle || !angle.ShownedAngles || !linePoints.length) return;
 
     const newCalculatedAngles: CalculatedAngle[] = [];
+    const lengthResult = computeLength();
 
     if (angle.HorizontalLines?.length) {
       const horizontalLine = getHorizontalLine();
@@ -266,6 +311,8 @@ const Angle = ({
           x: intersectionPoint.x,
           y: intersectionPoint.y,
           angle: angleDegrees,
+          length: lengthResult?.mm ?? undefined,
+          lengthPx: lengthResult?.px,
         });
       }
     } else if (angle.VerticalLines?.length) {
@@ -306,6 +353,8 @@ const Angle = ({
           x: intersectionPoint.x,
           y: intersectionPoint.y,
           angle: angleDegrees,
+          length: lengthResult?.mm ?? undefined,
+          lengthPx: lengthResult?.px,
         });
       }
     } else {
@@ -384,6 +433,7 @@ const Angle = ({
     handlePhotoAngleValues,
     getVerticalLine,
     getHorizontalLine,
+    computeLength,
   ]);
 
   const updateLinePoints = useCallback(() => {
@@ -565,20 +615,83 @@ const Angle = ({
     const baseFontSize = 20;
     const fontSize = baseFontSize / Math.max(stageScale, 0.001);
     const offset = fontSize * 0.5;
+    const angleLabelOffsetX = fontSize * 0.9;
 
-    return calculateAnglesArray.map((calculatedAngle, index) => (
-      <Text
-        key={`angle-${index}`}
-        text={`${calculatedAngle.angle.toFixed(1)}°`}
-        x={calculatedAngle.x + offset}
-        y={calculatedAngle.y - offset}
-        fill={lineColor}
-        fontSize={fontSize}
-        shadowBlur={10}
-        perfectDrawEnabled={false}
-      />
-    ));
-  }, [calculateAnglesArray, stageScale, lineColor]);
+    // Midpoint of the measured connection line, so the length label sits on
+    // the line rather than on the angle vertex.
+    const seg = linePoints[0];
+    const segMid =
+      seg &&
+      typeof seg.start.x === "number" &&
+      typeof seg.start.y === "number" &&
+      typeof seg.end.x === "number" &&
+      typeof seg.end.y === "number"
+        ? { x: (seg.start.x + seg.end.x) / 2, y: (seg.start.y + seg.end.y) / 2 }
+        : null;
+
+    return calculateAnglesArray.flatMap((calculatedAngle, index) => {
+      const nodes: React.ReactNode[] = [];
+
+      if (!angle.HideAngle) {
+        nodes.push(
+          <Text
+            key={`angle-${index}`}
+            text={`${calculatedAngle.angle.toFixed(1)}°`}
+            x={calculatedAngle.x + angleLabelOffsetX}
+            y={calculatedAngle.y - offset}
+            fill={lineColor}
+            fontSize={fontSize}
+            shadowBlur={10}
+            perfectDrawEnabled={false}
+          />
+        );
+      }
+
+      let lengthLabel: string | null = null;
+      if (typeof calculatedAngle.length === "number") {
+        lengthLabel = `${(calculatedAngle.length / 10).toFixed(1)} cm`;
+      } else if (
+        typeof calculatedAngle.lengthPx === "number" &&
+        angle.LengthFrom
+      ) {
+        lengthLabel = `${Math.round(calculatedAngle.lengthPx)} px`;
+      }
+
+      if (lengthLabel) {
+        const anchor = segMid ?? { x: calculatedAngle.x, y: calculatedAngle.y };
+        // Konva Text is top-left anchored; offset back by half the box to centre it.
+        const boxW = fontSize * 6;
+        const boxH = fontSize * 1.4;
+        nodes.push(
+          <Text
+            key={`length-${index}`}
+            text={lengthLabel}
+            x={anchor.x}
+            y={anchor.y}
+            width={boxW}
+            height={boxH}
+            offsetX={boxW / 2}
+            offsetY={boxH / 2}
+            align="center"
+            verticalAlign="middle"
+            fill={lineColor}
+            fontSize={fontSize}
+            shadowBlur={10}
+            perfectDrawEnabled={false}
+          />
+        );
+      }
+
+      return nodes;
+    });
+  }, [
+    calculateAnglesArray,
+    linePoints,
+    stageScale,
+    lineColor,
+    angle.HideAngle,
+    angle.LengthFrom,
+  ]);
 
   const pointComponents = useMemo(() => {
     return localPoints.map((point) => (
